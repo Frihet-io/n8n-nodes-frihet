@@ -1,0 +1,50 @@
+{
+  "name": "n8n-nodes-frihet",
+  "version": "1.0.0",
+  "description": "n8n community node for Frihet ERP — AI-native business management",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "frihet",
+    "erp",
+    "invoicing",
+    "accounting",
+    "expenses",
+    "automation"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Frihet",
+    "email": "dev@frihet.io",
+    "url": "https://frihet.io"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/berthelius/n8n-nodes-frihet.git"
+  },
+  "main": "dist/nodes/Frihet/Frihet.node.js",
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/FrihetApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Frihet/Frihet.node.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc && cp nodes/Frihet/frihet.svg dist/nodes/Frihet/ && cp nodes/Frihet/Frihet.node.json dist/nodes/Frihet/",
+    "prepublishOnly": "npm run build",
+    "dev": "tsc -w"
+  },
+  "devDependencies": {
+    "n8n-workflow": "^1.0.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "files": [
+    "dist"
+  ]
+}

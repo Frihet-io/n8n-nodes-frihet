@@ -1,0 +1,18 @@
+{
+  "node": "n8n-nodes-frihet.frihet",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["Productivity", "Finance"],
+  "resources": {
+    "primaryDocumentation": [
+      {
+        "url": "https://docs.frihet.io/api"
+      }
+    ],
+    "credentialDocumentation": [
+      {
+        "url": "https://docs.frihet.io/api/authentication"
+      }
+    ]
+  }
+}
