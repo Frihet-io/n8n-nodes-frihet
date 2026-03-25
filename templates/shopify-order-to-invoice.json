@@ -1,0 +1,356 @@
+{
+  "name": "Frihet | Shopify Order → Create Invoice",
+  "nodes": [
+    {
+      "parameters": {
+        "topic": "orders/create",
+        "options": {}
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000001",
+      "name": "Shopify: Order Created",
+      "type": "n8n-nodes-base.shopifyTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "shopifyApi": {
+          "id": "3",
+          "name": "Shopify API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "customerName",
+              "value": "={{ ($json.customer.first_name || '') + ' ' + ($json.customer.last_name || '') | trim || $json.billing_address.name || 'Shopify Customer' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "customerEmail",
+              "value": "={{ $json.email || $json.customer.email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "customerPhone",
+              "value": "={{ $json.customer.phone || $json.billing_address.phone || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "shopifyOrderId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-005",
+              "name": "shopifyOrderNumber",
+              "value": "={{ $json.order_number || $json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "field-006",
+              "name": "currency",
+              "value": "={{ $json.currency }}",
+              "type": "string"
+            },
+            {
+              "id": "field-007",
+              "name": "lineItems",
+              "value": "={{ $json.line_items }}",
+              "type": "array"
+            },
+            {
+              "id": "field-008",
+              "name": "shippingTotal",
+              "value": "={{ parseFloat($json.total_shipping_price_set.shop_money.amount || '0') }}",
+              "type": "number"
+            },
+            {
+              "id": "field-009",
+              "name": "billingCity",
+              "value": "={{ $json.billing_address.city || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-010",
+              "name": "billingCountry",
+              "value": "={{ $json.billing_address.country_code || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000002",
+      "name": "Extract Order Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "client",
+        "operation": "list",
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "q": "={{ $json.customerEmail }}"
+        }
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000003",
+      "name": "Search Client in Frihet",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [710, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-exists",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000004",
+      "name": "Client Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "resource": "client",
+        "operation": "create",
+        "clientName": "={{ $('Extract Order Data').item.json.customerName }}",
+        "clientAdditional": {
+          "email": "={{ $('Extract Order Data').item.json.customerEmail }}",
+          "phone": "={{ $('Extract Order Data').item.json.customerPhone }}",
+          "city": "={{ $('Extract Order Data').item.json.billingCity }}",
+          "country": "={{ $('Extract Order Data').item.json.billingCountry }}"
+        }
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000005",
+      "name": "Create Client",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [1170, 420],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "resolvedClientId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "resolvedClientName",
+              "value": "={{ $json.name || $('Extract Order Data').item.json.customerName }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000006",
+      "name": "Set Resolved Client",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Frihet invoice items from Shopify line items\nconst orderData = $('Extract Order Data').item.json;\nconst lineItems = orderData.lineItems || [];\n\nconst items = lineItems.map(item => ({\n  description: item.name || item.title || 'Product',\n  quantity: item.quantity || 1,\n  unitPrice: parseFloat(item.price || '0')\n}));\n\n// Add shipping if present\nif (orderData.shippingTotal > 0) {\n  items.push({\n    description: 'Shipping',\n    quantity: 1,\n    unitPrice: orderData.shippingTotal\n  });\n}\n\nconst clientData = $('Set Resolved Client').item.json;\n\nreturn [{\n  json: {\n    clientName: clientData.resolvedClientName,\n    clientId: clientData.resolvedClientId,\n    items,\n    currency: orderData.currency,\n    notes: `Shopify Order #${orderData.shopifyOrderNumber} (ID: ${orderData.shopifyOrderId})`,\n    shopifyOrderId: orderData.shopifyOrderId,\n    shopifyOrderNumber: orderData.shopifyOrderNumber\n  }\n}];"
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000007",
+      "name": "Build Invoice Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1630, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "create",
+        "clientName": "={{ $json.clientName }}",
+        "items": {
+          "item": "={{ $json.items }}"
+        },
+        "invoiceAdditional": {
+          "clientId": "={{ $json.clientId }}",
+          "currency": "={{ $json.currency }}",
+          "notes": "={{ $json.notes }}"
+        }
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000008",
+      "name": "Create Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [1860, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "send",
+        "invoiceId": "={{ $json.id }}",
+        "sendEmail": "={{ $('Extract Order Data').item.json.customerEmail }}"
+      },
+      "id": "f6a7b8c9-0006-4000-8000-000000000009",
+      "name": "Send Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [2090, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Shopify: Order Created": {
+      "main": [
+        [
+          {
+            "node": "Extract Order Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Order Data": {
+      "main": [
+        [
+          {
+            "node": "Search Client in Frihet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Client in Frihet": {
+      "main": [
+        [
+          {
+            "node": "Client Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client Exists?": {
+      "main": [
+        [
+          {
+            "node": "Set Resolved Client",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Client": {
+      "main": [
+        [
+          {
+            "node": "Set Resolved Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Resolved Client": {
+      "main": [
+        [
+          {
+            "node": "Build Invoice Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Invoice Items": {
+      "main": [
+        [
+          {
+            "node": "Create Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Invoice": {
+      "main": [
+        [
+          {
+            "node": "Send Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

@@ -1,0 +1,231 @@
+{
+  "name": "Frihet | Email Receipt → Create Expense",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "mailbox": "INBOX",
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "downloadAttachments": true,
+          "dataPropertyAttachmentsPrefixName": "attachment_"
+        }
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000001",
+      "name": "Email Trigger (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-001",
+              "leftValue": "={{ $json.subject }}",
+              "rightValue": "receipt|invoice|factura|recibo|compra|purchase",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000002",
+      "name": "Filter Receipt Emails",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "expenseDescription",
+              "value": "={{ $json.subject || 'Receipt from ' + $json.from }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "vendorName",
+              "value": "={{ $json.from.replace(/<.*>/, '').trim() || 'Unknown Vendor' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "receiptDate",
+              "value": "={{ new Date($json.date).toISOString().split('T')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "amount",
+              "value": "={{ parseFloat(($json.text || $json.html || '').match(/[€$£]\\s?([\\d,\\.]+)/)?.[1]?.replace(',', '.') || '0') || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "field-005",
+              "name": "emailBody",
+              "value": "={{ $json.text || $json.html || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000003",
+      "name": "Parse Receipt Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [710, 300]
+    },
+    {
+      "parameters": {
+        "resource": "expense",
+        "operation": "create",
+        "expenseDescription": "={{ $json.expenseDescription }}",
+        "amount": "={{ $json.amount > 0 ? $json.amount : 0 }}",
+        "expenseAdditional": {
+          "date": "={{ $json.receiptDate }}",
+          "notes": "={{ 'Auto-imported from email. From: ' + $json.vendorName }}"
+        }
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000004",
+      "name": "Create Expense",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [940, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-review",
+              "leftValue": "={{ $('Parse Receipt Data').item.json.amount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000005",
+      "name": "Amount Detected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1170, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.FINANCE_EMAIL || 'finance@company.com' }}",
+        "subject": "Action needed: receipt amount not detected",
+        "emailType": "text",
+        "message": "=A receipt was imported to Frihet but the amount could not be automatically detected.\n\nExpense ID: {{ $('Create Expense').item.json.id }}\nDescription: {{ $('Parse Receipt Data').item.json.expenseDescription }}\nFrom: {{ $('Parse Receipt Data').item.json.vendorName }}\n\nPlease log into Frihet and update the expense amount manually.",
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000006",
+      "name": "Notify: Amount Missing",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1400, 200]
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Filter Receipt Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Receipt Emails": {
+      "main": [
+        [
+          {
+            "node": "Parse Receipt Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Receipt Data": {
+      "main": [
+        [
+          {
+            "node": "Create Expense",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Expense": {
+      "main": [
+        [
+          {
+            "node": "Amount Detected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Amount Detected?": {
+      "main": [
+        [
+          {
+            "node": "Notify: Amount Missing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

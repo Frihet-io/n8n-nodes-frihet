@@ -1,0 +1,187 @@
+{
+  "name": "Frihet | Monthly Tax Summary Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "c3d4e5f6-0003-4000-8000-000000000001",
+      "name": "Schedule: 1st of Month",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "currentDate",
+              "value": "={{ new Date() }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "firstDayLastMonth",
+              "value": "={{ (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().split('T')[0]; })() }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "lastDayLastMonth",
+              "value": "={{ (() => { const d = new Date(); d.setDate(0); return d.toISOString().split('T')[0]; })() }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "monthName",
+              "value": "={{ (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }); })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c3d4e5f6-0003-4000-8000-000000000002",
+      "name": "Calculate Date Range",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "status": "paid",
+          "from": "={{ $json.firstDayLastMonth }}",
+          "to": "={{ $json.lastDayLastMonth }}"
+        }
+      },
+      "id": "c3d4e5f6-0003-4000-8000-000000000003",
+      "name": "List Paid Invoices",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [710, 200],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "expense",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "from": "={{ $('Calculate Date Range').item.json.firstDayLastMonth }}",
+          "to": "={{ $('Calculate Date Range').item.json.lastDayLastMonth }}"
+        }
+      },
+      "id": "c3d4e5f6-0003-4000-8000-000000000004",
+      "name": "List Expenses",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [710, 420],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate invoice data from the first input\nconst invoices = $input.all()[0]?.json ? \n  $input.all().map(item => item.json) : [];\n\n// Get expense data passed from Set node\nconst expensesRaw = $('List Expenses').all();\nconst expenses = expensesRaw.map(e => e.json);\n\n// Revenue calculations\nconst totalRevenue = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);\nconst taxCollected = invoices.reduce((sum, inv) => sum + (inv.taxAmount || (inv.total - inv.subtotal) || 0), 0);\nconst subtotalRevenue = invoices.reduce((sum, inv) => sum + (inv.subtotal || inv.total || 0), 0);\n\n// Expense calculations\nconst totalExpenses = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);\nconst taxPaid = expenses.reduce((sum, exp) => sum + (exp.taxAmount || 0), 0);\n\n// Net calculations\nconst netVAT = taxCollected - taxPaid;\nconst netProfit = subtotalRevenue - totalExpenses;\n\n// Invoice breakdown by status\nconst byStatus = invoices.reduce((acc, inv) => {\n  const status = inv.status || 'unknown';\n  acc[status] = (acc[status] || 0) + 1;\n  return acc;\n}, {});\n\nconst monthName = $('Calculate Date Range').item.json.monthName;\nconst period = $('Calculate Date Range').item.json.firstDayLastMonth + ' to ' + $('Calculate Date Range').item.json.lastDayLastMonth;\n\nreturn [{\n  json: {\n    period,\n    monthName,\n    invoiceCount: invoices.length,\n    expenseCount: expenses.length,\n    totalRevenue: totalRevenue.toFixed(2),\n    subtotalRevenue: subtotalRevenue.toFixed(2),\n    taxCollected: taxCollected.toFixed(2),\n    totalExpenses: totalExpenses.toFixed(2),\n    taxPaid: taxPaid.toFixed(2),\n    netVAT: netVAT.toFixed(2),\n    netProfit: netProfit.toFixed(2),\n    invoicesByStatus: JSON.stringify(byStatus),\n    reportGeneratedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "c3d4e5f6-0003-4000-8000-000000000005",
+      "name": "Calculate Tax Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.FINANCE_EMAIL || 'finance@company.com' }}",
+        "subject": "=Monthly Tax Summary — {{ $json.monthName }}",
+        "emailType": "html",
+        "message": "=<h2>Monthly Financial Summary — {{ $json.monthName }}</h2>\n<p><strong>Period:</strong> {{ $json.period }}</p>\n\n<h3>Revenue</h3>\n<table border='1' cellpadding='6' style='border-collapse:collapse'>\n  <tr><td>Gross Revenue (incl. tax)</td><td><strong>€{{ $json.totalRevenue }}</strong></td></tr>\n  <tr><td>Net Revenue (excl. tax)</td><td>€{{ $json.subtotalRevenue }}</td></tr>\n  <tr><td>VAT / Tax Collected</td><td>€{{ $json.taxCollected }}</td></tr>\n  <tr><td>Total Invoices</td><td>{{ $json.invoiceCount }}</td></tr>\n</table>\n\n<h3>Expenses</h3>\n<table border='1' cellpadding='6' style='border-collapse:collapse'>\n  <tr><td>Total Expenses</td><td><strong>€{{ $json.totalExpenses }}</strong></td></tr>\n  <tr><td>VAT / Tax Paid</td><td>€{{ $json.taxPaid }}</td></tr>\n  <tr><td>Total Expense Records</td><td>{{ $json.expenseCount }}</td></tr>\n</table>\n\n<h3>Net Position</h3>\n<table border='1' cellpadding='6' style='border-collapse:collapse'>\n  <tr><td>Net Profit</td><td><strong>€{{ $json.netProfit }}</strong></td></tr>\n  <tr><td>Net VAT to Declare</td><td><strong>€{{ $json.netVAT }}</strong></td></tr>\n</table>\n\n<p><em>Invoice status breakdown: {{ $json.invoicesByStatus }}</em></p>\n<p style='color:#999;font-size:12px'>Generated by Frihet ERP on {{ $json.reportGeneratedAt }}</p>",
+        "options": {}
+      },
+      "id": "c3d4e5f6-0003-4000-8000-000000000006",
+      "name": "Send Summary Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1170, 300]
+    }
+  ],
+  "connections": {
+    "Schedule: 1st of Month": {
+      "main": [
+        [
+          {
+            "node": "Calculate Date Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Date Range": {
+      "main": [
+        [
+          {
+            "node": "List Paid Invoices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "List Expenses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Paid Invoices": {
+      "main": [
+        [
+          {
+            "node": "Calculate Tax Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Tax Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Summary Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

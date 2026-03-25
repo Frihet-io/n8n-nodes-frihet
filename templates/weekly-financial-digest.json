@@ -1,0 +1,192 @@
+{
+  "name": "Frihet | Weekly Financial Digest → Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "a7b8c9d0-0007-4000-8000-000000000001",
+      "name": "Schedule: Monday 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "weekStart",
+              "value": "={{ (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().split('T')[0]; })() }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "weekEnd",
+              "value": "={{ (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })() }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "weekLabel",
+              "value": "={{ (() => { const d = new Date(); d.setDate(d.getDate() - 7); const opts = { month: 'short', day: 'numeric' }; const end = new Date(); end.setDate(end.getDate() - 1); return d.toLocaleDateString('en-US', opts) + ' – ' + end.toLocaleDateString('en-US', opts); })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7b8c9d0-0007-4000-8000-000000000002",
+      "name": "Calculate Week Range",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "from": "={{ $json.weekStart }}",
+          "to": "={{ $json.weekEnd }}"
+        }
+      },
+      "id": "a7b8c9d0-0007-4000-8000-000000000003",
+      "name": "List Week Invoices",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [710, 180],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "expense",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "from": "={{ $('Calculate Week Range').item.json.weekStart }}",
+          "to": "={{ $('Calculate Week Range').item.json.weekEnd }}"
+        }
+      },
+      "id": "a7b8c9d0-0007-4000-8000-000000000004",
+      "name": "List Week Expenses",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [710, 420],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull all invoices\nconst invoices = $('List Week Invoices').all().map(i => i.json);\nconst expenses = $('List Week Expenses').all().map(e => e.json);\nconst weekLabel = $('Calculate Week Range').item.json.weekLabel;\n\n// Revenue metrics\nconst paidInvoices = invoices.filter(i => i.status === 'paid');\nconst pendingInvoices = invoices.filter(i => ['sent', 'draft'].includes(i.status));\nconst overdueInvoices = invoices.filter(i => i.status === 'overdue');\n\nconst revenue = paidInvoices.reduce((s, i) => s + (i.total || 0), 0);\nconst pending = pendingInvoices.reduce((s, i) => s + (i.total || 0), 0);\nconst overdue = overdueInvoices.reduce((s, i) => s + (i.total || 0), 0);\n\n// Expense metrics\nconst totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);\n\n// Profit\nconst netProfit = revenue - totalExpenses;\nconst profitMargin = revenue > 0 ? ((netProfit / revenue) * 100).toFixed(1) : 0;\n\n// Top clients by revenue this week\nconst clientRevenue = {};\npaidInvoices.forEach(inv => {\n  const name = inv.clientName || 'Unknown';\n  clientRevenue[name] = (clientRevenue[name] || 0) + (inv.total || 0);\n});\nconst topClients = Object.entries(clientRevenue)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 3)\n  .map(([name, amount]) => `${name}: €${amount.toFixed(2)}`)\n  .join('\\n');\n\n// Emoji for profit trend\nconst profitEmoji = netProfit > 0 ? '📈' : netProfit === 0 ? '➡️' : '📉';\n\nconst slackMessage = [\n  `*Frihet Weekly Digest — ${weekLabel}* ${profitEmoji}`,\n  '',\n  '*Revenue*',\n  `• Collected: *€${revenue.toFixed(2)}* (${paidInvoices.length} invoices)`,\n  `• Pending: €${pending.toFixed(2)} (${pendingInvoices.length} invoices)`,\n  `• Overdue: €${overdue.toFixed(2)} (${overdueInvoices.length} invoices)`,\n  '',\n  '*Expenses*',\n  `• Total: *€${totalExpenses.toFixed(2)}* (${expenses.length} records)`,\n  '',\n  '*Bottom Line*',\n  `• Net Profit: *€${netProfit.toFixed(2)}*`,\n  `• Margin: ${profitMargin}%`,\n  '',\n  topClients ? `*Top Clients*\\n${topClients}` : '',\n  '',\n  `_Generated by <https://app.frihet.io|Frihet ERP>_`\n].filter(Boolean).join('\\n');\n\nreturn [{ json: { slackMessage, weekLabel, revenue, totalExpenses, netProfit, profitMargin } }];"
+      },
+      "id": "a7b8c9d0-0007-4000-8000-000000000005",
+      "name": "Calculate Weekly Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $env.SLACK_CHANNEL_ID || '#finance' }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.slackMessage }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "a7b8c9d0-0007-4000-8000-000000000006",
+      "name": "Send to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1170, 300],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "4",
+          "name": "Slack OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: Monday 8am": {
+      "main": [
+        [
+          {
+            "node": "Calculate Week Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Week Range": {
+      "main": [
+        [
+          {
+            "node": "List Week Invoices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "List Week Expenses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Week Invoices": {
+      "main": [
+        [
+          {
+            "node": "Calculate Weekly Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Weekly Summary": {
+      "main": [
+        [
+          {
+            "node": "Send to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

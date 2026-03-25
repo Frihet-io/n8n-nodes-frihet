@@ -1,0 +1,266 @@
+{
+  "name": "Frihet | Quote Accepted → Auto-Create & Send Invoice",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "frihet-quote-accepted",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000001",
+      "name": "Webhook: quote.accepted",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "frihet-quote-accepted"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000002",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [480, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-event",
+              "leftValue": "={{ $json.body.event || $json.event }}",
+              "rightValue": "quote.accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000003",
+      "name": "Verify Event: quote.accepted",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "quoteId",
+              "value": "={{ $json.body.data.id || $json.data.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "acceptedAt",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000004",
+      "name": "Extract Quote ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [710, 300]
+    },
+    {
+      "parameters": {
+        "resource": "quote",
+        "operation": "get",
+        "quoteId": "={{ $json.quoteId }}"
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000005",
+      "name": "Get Quote Details",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [940, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map quote fields to invoice fields\nconst quote = $input.item.json;\n\n// Preserve all line items from the quote\nconst items = (quote.items || []).map(item => ({\n  description: item.description || item.name || 'Service',\n  quantity: item.quantity || 1,\n  unitPrice: item.unitPrice || item.price || 0\n}));\n\n// Calculate due date (default: 30 days from today)\nconst dueDate = new Date();\ndueDate.setDate(dueDate.getDate() + 30);\n\nreturn [{\n  json: {\n    // Client info from quote\n    clientName: quote.clientName || '',\n    clientId: quote.clientId || '',\n    clientEmail: quote.clientEmail || '',\n    \n    // Invoice items mapped from quote\n    items,\n    \n    // Financials\n    currency: quote.currency || 'EUR',\n    discount: quote.discount || 0,\n    taxRate: quote.taxRate || 0,\n    \n    // Metadata\n    dueDate: dueDate.toISOString().split('T')[0],\n    notes: `Invoice generated from accepted Quote #${quote.number || quote.id}. ${quote.notes || ''}`.trim(),\n    \n    // Reference\n    quoteId: quote.id,\n    quoteNumber: quote.number || quote.id\n  }\n}];"
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000006",
+      "name": "Map Quote → Invoice Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1170, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "create",
+        "clientName": "={{ $json.clientName }}",
+        "items": {
+          "item": "={{ $json.items }}"
+        },
+        "invoiceAdditional": {
+          "clientId": "={{ $json.clientId }}",
+          "clientEmail": "={{ $json.clientEmail }}",
+          "currency": "={{ $json.currency }}",
+          "dueDate": "={{ $json.dueDate }}",
+          "notes": "={{ $json.notes }}"
+        }
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000007",
+      "name": "Create Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [1400, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "send",
+        "invoiceId": "={{ $json.id }}",
+        "sendEmail": "={{ $('Map Quote → Invoice Fields').item.json.clientEmail }}"
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000008",
+      "name": "Send Invoice to Client",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [1630, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.FINANCE_EMAIL || 'finance@company.com' }}",
+        "subject": "=Invoice created from accepted quote — {{ $('Map Quote → Invoice Fields').item.json.clientName }}",
+        "emailType": "html",
+        "message": "=<h2>Quote Accepted — Invoice Generated</h2>\n<p>A quote was accepted and an invoice has been automatically created and sent.</p>\n\n<table border='1' cellpadding='6' style='border-collapse:collapse'>\n  <tr><td>Client</td><td><strong>{{ $('Map Quote → Invoice Fields').item.json.clientName }}</strong></td></tr>\n  <tr><td>Invoice ID</td><td>{{ $('Create Invoice').item.json.id }}</td></tr>\n  <tr><td>Original Quote</td><td>{{ $('Map Quote → Invoice Fields').item.json.quoteNumber }}</td></tr>\n  <tr><td>Due Date</td><td>{{ $('Map Quote → Invoice Fields').item.json.dueDate }}</td></tr>\n  <tr><td>Currency</td><td>{{ $('Map Quote → Invoice Fields').item.json.currency }}</td></tr>\n</table>\n\n<p>The invoice has been sent to <strong>{{ $('Map Quote → Invoice Fields').item.json.clientEmail }}</strong></p>\n\n<p style='color:#999;font-size:12px'>Automated by Frihet ERP</p>",
+        "options": {}
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000009",
+      "name": "Notify Internal Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1860, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: quote.accepted": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Verify Event: quote.accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Event: quote.accepted": {
+      "main": [
+        [
+          {
+            "node": "Extract Quote ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Quote ID": {
+      "main": [
+        [
+          {
+            "node": "Get Quote Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Quote Details": {
+      "main": [
+        [
+          {
+            "node": "Map Quote → Invoice Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Quote → Invoice Fields": {
+      "main": [
+        [
+          {
+            "node": "Create Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Invoice": {
+      "main": [
+        [
+          {
+            "node": "Send Invoice to Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Invoice to Client": {
+      "main": [
+        [
+          {
+            "node": "Notify Internal Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

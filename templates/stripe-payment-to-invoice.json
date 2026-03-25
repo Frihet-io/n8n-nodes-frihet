@@ -1,0 +1,193 @@
+{
+  "name": "Frihet | Stripe Payment → Create & Send Invoice",
+  "nodes": [
+    {
+      "parameters": {
+        "events": ["payment_intent.succeeded"],
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Stripe Trigger",
+      "type": "n8n-nodes-base.stripeTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "stripe-frihet-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "clientName",
+              "value": "={{ $json.data.object.metadata.customer_name || $json.data.object.description || 'Stripe Customer' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "clientEmail",
+              "value": "={{ $json.data.object.receipt_email || $json.data.object.metadata.email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "amount",
+              "value": "={{ $json.data.object.amount / 100 }}",
+              "type": "number"
+            },
+            {
+              "id": "field-004",
+              "name": "currency",
+              "value": "={{ $json.data.object.currency.toUpperCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "field-005",
+              "name": "description",
+              "value": "={{ $json.data.object.description || 'Payment via Stripe' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-006",
+              "name": "paymentIntentId",
+              "value": "={{ $json.data.object.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Extract Payment Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "create",
+        "clientName": "={{ $json.clientName }}",
+        "items": {
+          "item": [
+            {
+              "description": "={{ $json.description }}",
+              "quantity": 1,
+              "unitPrice": "={{ $json.amount }}"
+            }
+          ]
+        },
+        "invoiceAdditional": {
+          "clientEmail": "={{ $json.clientEmail }}",
+          "currency": "={{ $json.currency }}",
+          "notes": "={{ 'Stripe Payment ID: ' + $json.paymentIntentId }}"
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "name": "Create Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [710, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "markPaid",
+        "invoiceId": "={{ $json.id }}",
+        "markPaidAdditional": {
+          "paymentMethod": "stripe",
+          "paidDate": "={{ new Date().toISOString().split('T')[0] }}"
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "name": "Mark Invoice Paid",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [940, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "send",
+        "invoiceId": "={{ $json.id }}",
+        "sendEmail": "={{ $('Extract Payment Data').item.json.clientEmail }}"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "name": "Send Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [1170, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Stripe Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Payment Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Payment Data": {
+      "main": [
+        [
+          {
+            "node": "Create Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Invoice": {
+      "main": [
+        [
+          {
+            "node": "Mark Invoice Paid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Invoice Paid": {
+      "main": [
+        [
+          {
+            "node": "Send Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

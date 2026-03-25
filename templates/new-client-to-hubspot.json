@@ -1,0 +1,262 @@
+{
+  "name": "Frihet | New Client → HubSpot Contact",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "frihet-client-created",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e5f6a7b8-0005-4000-8000-000000000001",
+      "name": "Webhook: client.created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "frihet-client-created"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "e5f6a7b8-0005-4000-8000-000000000002",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [480, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-event",
+              "leftValue": "={{ $json.body.event || $json.event }}",
+              "rightValue": "client.created",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e5f6a7b8-0005-4000-8000-000000000003",
+      "name": "Verify Event Type",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "firstname",
+              "value": "={{ ($json.body.data.name || $json.data.name || '').split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "lastname",
+              "value": "={{ ($json.body.data.name || $json.data.name || '').split(' ').slice(1).join(' ') || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "email",
+              "value": "={{ $json.body.data.email || $json.data.email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "phone",
+              "value": "={{ $json.body.data.phone || $json.data.phone || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-005",
+              "name": "company",
+              "value": "={{ $json.body.data.company || $json.data.company || $json.body.data.name || $json.data.name || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-006",
+              "name": "address",
+              "value": "={{ $json.body.data.address || $json.data.address || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-007",
+              "name": "city",
+              "value": "={{ $json.body.data.city || $json.data.city || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-008",
+              "name": "country",
+              "value": "={{ $json.body.data.country || $json.data.country || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-009",
+              "name": "taxId",
+              "value": "={{ $json.body.data.taxId || $json.data.taxId || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-010",
+              "name": "frihetClientId",
+              "value": "={{ $json.body.data.id || $json.data.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-011",
+              "name": "website",
+              "value": "={{ $json.body.data.website || $json.data.website || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e5f6a7b8-0005-4000-8000-000000000004",
+      "name": "Map Client Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [710, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "additionalFields": {
+          "company": "={{ $json.company }}",
+          "phone": "={{ $json.phone }}",
+          "address": "={{ $json.address }}",
+          "city": "={{ $json.city }}",
+          "country": "={{ $json.country }}",
+          "website": "={{ $json.website }}"
+        },
+        "email": "={{ $json.email }}",
+        "firstName": "={{ $json.firstname }}",
+        "lastName": "={{ $json.lastname }}"
+      },
+      "id": "e5f6a7b8-0005-4000-8000-000000000005",
+      "name": "Upsert HubSpot Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [940, 300],
+      "credentials": {
+        "hubspotApi": {
+          "id": "2",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "update",
+        "contactId": "={{ $json.id }}",
+        "additionalFields": {
+          "customPropertiesUi": {
+            "customPropertiesValues": [
+              {
+                "property": "frihet_client_id",
+                "value": "={{ $('Map Client Fields').item.json.frihetClientId }}"
+              },
+              {
+                "property": "tax_id",
+                "value": "={{ $('Map Client Fields').item.json.taxId }}"
+              },
+              {
+                "property": "lead_source",
+                "value": "Frihet ERP"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e5f6a7b8-0005-4000-8000-000000000006",
+      "name": "Tag Contact: Frihet Source",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [1170, 300],
+      "credentials": {
+        "hubspotApi": {
+          "id": "2",
+          "name": "HubSpot API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: client.created": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Verify Event Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Event Type": {
+      "main": [
+        [
+          {
+            "node": "Map Client Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Client Fields": {
+      "main": [
+        [
+          {
+            "node": "Upsert HubSpot Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert HubSpot Contact": {
+      "main": [
+        [
+          {
+            "node": "Tag Contact: Frihet Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}

@@ -1,0 +1,252 @@
+{
+  "name": "Frihet | Daily Overdue Invoice Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000001",
+      "name": "Schedule: Weekdays 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "status": "overdue"
+        }
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000002",
+      "name": "List Overdue Invoices",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [480, 300],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-email",
+              "leftValue": "={{ $json.clientEmail }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000003",
+      "name": "Has Client Email?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [710, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "daysOverdue",
+              "value": "={{ Math.floor((new Date() - new Date($json.dueDate)) / (1000 * 60 * 60 * 24)) }}",
+              "type": "number"
+            },
+            {
+              "id": "field-002",
+              "name": "urgencyLevel",
+              "value": "={{ Math.floor((new Date() - new Date($json.dueDate)) / (1000 * 60 * 60 * 24)) > 30 ? 'URGENT' : Math.floor((new Date() - new Date($json.dueDate)) / (1000 * 60 * 60 * 24)) > 14 ? 'HIGH' : 'STANDARD' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "invoiceId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "clientName",
+              "value": "={{ $json.clientName }}",
+              "type": "string"
+            },
+            {
+              "id": "field-005",
+              "name": "clientEmail",
+              "value": "={{ $json.clientEmail }}",
+              "type": "string"
+            },
+            {
+              "id": "field-006",
+              "name": "invoiceNumber",
+              "value": "={{ $json.number || $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-007",
+              "name": "amount",
+              "value": "={{ $json.total }}",
+              "type": "number"
+            },
+            {
+              "id": "field-008",
+              "name": "dueDate",
+              "value": "={{ $json.dueDate }}",
+              "type": "string"
+            },
+            {
+              "id": "field-009",
+              "name": "currency",
+              "value": "={{ $json.currency || 'EUR' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000004",
+      "name": "Enrich Invoice Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "send",
+        "invoiceId": "={{ $json.invoiceId }}",
+        "sendEmail": "={{ $json.clientEmail }}"
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000005",
+      "name": "Send Reminder via Frihet",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [1170, 200],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all overdue invoices into one internal summary\nconst items = $input.all();\n\nif (items.length === 0) {\n  return [{ json: { summary: 'No overdue invoices today.', count: 0 } }];\n}\n\nconst urgentCount = items.filter(i => i.json.urgencyLevel === 'URGENT').length;\nconst highCount = items.filter(i => i.json.urgencyLevel === 'HIGH').length;\nconst standardCount = items.filter(i => i.json.urgencyLevel === 'STANDARD').length;\nconst totalAmount = items.reduce((sum, i) => sum + (parseFloat(i.json.amount) || 0), 0);\n\nconst lines = items.map(i => \n  `• ${i.json.clientName} — Invoice ${i.json.invoiceNumber} — €${i.json.amount} — ${i.json.daysOverdue} days overdue [${i.json.urgencyLevel}]`\n).join('\\n');\n\nreturn [{\n  json: {\n    count: items.length,\n    urgentCount,\n    highCount,\n    standardCount,\n    totalAmountOverdue: totalAmount.toFixed(2),\n    details: lines,\n    date: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000006",
+      "name": "Build Internal Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1170, 420]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.FINANCE_EMAIL || 'finance@company.com' }}",
+        "subject": "=[{{ $json.count }} overdue] Daily invoice reminder report — {{ $json.date }}",
+        "emailType": "html",
+        "message": "=<h2>Daily Overdue Invoice Report — {{ $json.date }}</h2>\n<p>Reminders sent to clients for <strong>{{ $json.count }}</strong> overdue invoices.</p>\n\n<table border='1' cellpadding='6' style='border-collapse:collapse'>\n  <tr><td>Total Amount Overdue</td><td><strong>€{{ $json.totalAmountOverdue }}</strong></td></tr>\n  <tr><td>Urgent (&gt;30 days)</td><td>{{ $json.urgentCount }}</td></tr>\n  <tr><td>High (14-30 days)</td><td>{{ $json.highCount }}</td></tr>\n  <tr><td>Standard (&lt;14 days)</td><td>{{ $json.standardCount }}</td></tr>\n</table>\n\n<h3>Details</h3>\n<pre style='background:#f5f5f5;padding:12px;'>{{ $json.details }}</pre>\n\n<p style='color:#999;font-size:12px'>Automated report by Frihet ERP</p>",
+        "options": {}
+      },
+      "id": "d4e5f6a7-0004-4000-8000-000000000007",
+      "name": "Send Internal Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1400, 420]
+    }
+  ],
+  "connections": {
+    "Schedule: Weekdays 9am": {
+      "main": [
+        [
+          {
+            "node": "List Overdue Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Overdue Invoices": {
+      "main": [
+        [
+          {
+            "node": "Has Client Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Client Email?": {
+      "main": [
+        [
+          {
+            "node": "Enrich Invoice Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Invoice Data": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder via Frihet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Internal Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Internal Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Internal Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}
