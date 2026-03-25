@@ -63,7 +63,7 @@ Frihet API: 100 requests/minute per API key. The node will throw `NodeApiError` 
 - [Frihet](https://frihet.io)
 - [API Documentation](https://docs.frihet.io/api)
 - [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server)
-- [GitHub](https://github.com/berthelius/n8n-nodes-frihet)
+- [GitHub](https://github.com/Frihet-io/n8n-nodes-frihet)
 
 ## License
 
