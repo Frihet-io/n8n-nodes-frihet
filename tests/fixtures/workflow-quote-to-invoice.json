@@ -1,0 +1,38 @@
+{
+  "name": "Frihet | Quote Accepted → Invoice (test fixture)",
+  "nodes": [
+    {
+      "id": "fixture-001",
+      "name": "Frihet: Create Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "parameters": {
+        "resource": "invoice",
+        "operation": "create",
+        "clientName": "Acme Corp",
+        "items": {
+          "item": [
+            {
+              "description": "Consulting services",
+              "quantity": 10,
+              "unitPrice": 100
+            }
+          ]
+        },
+        "invoiceAdditional": {
+          "clientLocation": "peninsula",
+          "taxRate": 21,
+          "irpfRate": 15
+        }
+      },
+      "credentials": {
+        "frihetApi": {
+          "id": "test-cred-id",
+          "name": "Frihet API (test)"
+        }
+      }
+    }
+  ],
+  "connections": {}
+}

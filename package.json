@@ -36,10 +36,19 @@
   "scripts": {
     "build": "tsc && cp nodes/Frihet/frihet.svg dist/nodes/Frihet/ && cp nodes/Frihet/Frihet.node.json dist/nodes/Frihet/",
     "prepublishOnly": "npm run build",
-    "dev": "tsc -w"
+    "dev": "tsc -w",
+    "test": "jest",
+    "lint": "eslint nodes credentials"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.61.0",
+    "@typescript-eslint/parser": "^8.61.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-n8n-nodes-base": "^1.16.6",
+    "jest": "^30.4.2",
     "n8n-workflow": "^1.0.0",
+    "ts-jest": "^29.4.11",
     "typescript": "^5.3.0"
   },
   "peerDependencies": {

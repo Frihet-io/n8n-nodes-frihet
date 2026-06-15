@@ -1,0 +1,53 @@
+{
+  "name": "Frihet | Overdue Invoice Reminder (test fixture)",
+  "nodes": [
+    {
+      "id": "fixture-002",
+      "name": "Frihet: List Invoices",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "resource": "invoice",
+        "operation": "list",
+        "returnAll": false,
+        "limit": 50,
+        "filters": {
+          "status": "overdue"
+        }
+      },
+      "credentials": {
+        "frihetApi": {
+          "id": "test-cred-id",
+          "name": "Frihet API (test)"
+        }
+      }
+    },
+    {
+      "id": "fixture-003",
+      "name": "Frihet: Send Invoice",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "parameters": {
+        "resource": "invoice",
+        "operation": "send",
+        "invoiceId": "={{ $json.id }}",
+        "sendEmail": ""
+      },
+      "credentials": {
+        "frihetApi": {
+          "id": "test-cred-id",
+          "name": "Frihet API (test)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Frihet: List Invoices": {
+      "main": [
+        [{ "node": "Frihet: Send Invoice", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}
