@@ -6,13 +6,20 @@ Create invoices, manage expenses, sync clients, and automate your business workf
 
 ## Installation
 
+### n8n Cloud / Self-hosted UI
+
 In your n8n instance: **Settings → Community Nodes → Install → `n8n-nodes-frihet`**
 
-Or via CLI:
+> Community nodes require n8n ≥ 0.187.0 and must be enabled in your instance settings
+> (`N8N_NODES_INCLUDE_UNVERIFIED=true` for self-hosted).
+
+### npm (self-hosted / Docker)
 
 ```bash
 npm install n8n-nodes-frihet
 ```
+
+Then restart your n8n instance. The Frihet node will appear in the node palette under **Action in an app → Frihet**.
 
 ## Operations
 
@@ -57,6 +64,17 @@ Optionally set a custom **Base URL** for self-hosted Frihet deployments.
 ## API Rate Limits
 
 Frihet API: 100 requests/minute per API key. The node will throw `NodeApiError` on 429 responses.
+
+## Roadmap
+
+Current coverage: 6 resources (~33 operations, ~20% of the Frihet REST API surface).
+
+**Wave 2** — planned but not yet shipped:
+- Extended resource coverage (bank accounts, fiscal calendar, VeriFactu/TicketBAI signed-invoice flows, Facturae e-invoice export, payment splits)
+- n8n verified-node status (automated tests, CI provenance, community review)
+- Trigger nodes for Frihet webhooks (invoice paid, client created, etc.)
+
+The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server) (`@frihet/mcp-server@1.12.0`) exposes the full API surface (151 tools, native ES/EU fiscal compliance including VeriFactu/TicketBAI/Facturae) and is available today for AI agent workflows.
 
 ## Links
 
