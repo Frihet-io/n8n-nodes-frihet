@@ -78,8 +78,6 @@
           ]
         },
         "invoiceAdditional": {
-          "clientEmail": "={{ $json.clientEmail }}",
-          "currency": "={{ $json.currency }}",
           "notes": "={{ 'Stripe Payment ID: ' + $json.paymentIntentId }}"
         }
       },

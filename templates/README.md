@@ -146,13 +146,26 @@ For templates 5 and 8, configure webhooks in your Frihet settings:
 - **client.created** → `https://your-n8n.instance/webhook/frihet-client-created`
 - **quote.accepted** → `https://your-n8n.instance/webhook/frihet-quote-accepted`
 
-The webhook payload format is:
+The webhook payload is the **resource snapshot** wrapped under the resource key
+(matches the ERP `triggerWebhooks` envelope in `webhooks.ts:527-560`):
+
 ```json
 {
-  "event": "client.created",
-  "data": { ... resource fields ... }
+  "client": { "id": "...", "name": "...", "email": "...", ... }
 }
 ```
+
+For `quote.accepted`:
+```json
+{
+  "quote": { "id": "...", "documentsNumber": "...", "clientId": "...", ... }
+}
+```
+
+The event type is also carried in the `X-Frihet-Event` header, separately
+from the body. If a `secret` is configured on the webhook subscription, the
+delivery also carries `X-Frihet-Signature: sha256=<hex>` (HMAC-SHA256 of the
+raw body).
 
 ---
 

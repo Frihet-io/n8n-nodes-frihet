@@ -67,12 +67,37 @@ Frihet API: 100 requests/minute per API key. The node will throw `NodeApiError` 
 
 ## Roadmap
 
-Current coverage: 6 resources (~33 operations, ~20% of the Frihet REST API surface).
+Current coverage: 6 resources, **33 operations** across generic CRUD plus
+`/send` and `/paid` actions. Approximately **20% of the Frihet REST API
+surface** — the 6 generic CRUD resources out of ~30 route families in
+`publicApi.ts`.
+
+**`markPaid` caveat:** the `POST /v1/invoices/{id}/paid` endpoint only
+mutates `status`, `paidAt`, and `updatedAt`. It does NOT create a payment
+record. If your workflow needs to record "the client paid by bank transfer
+on 2026-08-20", use the [@frihet/mcp-server](https://www.npmjs.com/package/@frihet/mcp-server)
+(`Payment Authority V1` tool) — the REST `/paid` endpoint alone is the
+state mutation, not the authoritative payment ledger.
+
+**`send` payload:** the n8n UI parameter is `sendEmail` for UX continuity,
+but the wire field is `recipientEmail` (strict zod on the server).
+
+**Invoice create phantom fields:** `currency` and `clientEmail` are accepted
+in the n8n UI's `invoiceAdditional` collection for legacy reasons but the
+ERP strict-zod schema rejects them. The node strips them silently — the
+server defaults `currency` to EUR and resolves `clientEmail` from the client
+doc. See `CONTRACT_MATRIX.md` §3.1.A for the canonical schema.
+
+**Webhook payload:** the `client.created` and `quote.accepted` events
+deliver as `{ client: { id, ... } }` and `{ quote: { id, ... } }`
+respectively (the `X-Frihet-Event` header carries the event type).
 
 **Wave 2** — planned but not yet shipped:
 - Extended resource coverage (bank accounts, fiscal calendar, VeriFactu/TicketBAI signed-invoice flows, Facturae e-invoice export, payment splits)
 - n8n verified-node status (automated tests, CI provenance, community review)
 - Trigger nodes for Frihet webhooks (invoice paid, client created, etc.)
+- `Idempotency-Key` propagation on fiscal writes (currently the node does
+  not emit it; retries of fiscal writes can produce duplicate fiscal numbers)
 
 The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server) (`@frihet/mcp-server@1.12.0`) exposes the full API surface (151 tools, native ES/EU fiscal compliance including VeriFactu/TicketBAI/Facturae) and is available today for AI agent workflows.
 

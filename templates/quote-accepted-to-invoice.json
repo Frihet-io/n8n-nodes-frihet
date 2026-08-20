@@ -63,7 +63,7 @@
             {
               "id": "field-001",
               "name": "quoteId",
-              "value": "={{ $json.body.data.id || $json.data.id }}",
+              "value": "={{ $json.body.quote.id || $json.quote.id }}",
               "type": "string"
             },
             {
@@ -120,8 +120,6 @@
         },
         "invoiceAdditional": {
           "clientId": "={{ $json.clientId }}",
-          "clientEmail": "={{ $json.clientEmail }}",
-          "currency": "={{ $json.currency }}",
           "dueDate": "={{ $json.dueDate }}",
           "notes": "={{ $json.notes }}"
         }

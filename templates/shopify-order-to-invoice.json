@@ -213,7 +213,6 @@
         },
         "invoiceAdditional": {
           "clientId": "={{ $json.clientId }}",
-          "currency": "={{ $json.currency }}",
           "notes": "={{ $json.notes }}"
         }
       },

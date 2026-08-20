@@ -8,6 +8,30 @@ import {
 } from 'n8n-workflow';
 import { frihetApiRequest, frihetApiRequestAllItems } from './GenericFunctions';
 
+/**
+ * Fields that the n8n node UI exposes (or templates pass via
+ * fixedCollection parameters) but the ERP publicApi strict-zod schema
+ * rejects on invoice create. The server has its own defaults/cross-resolves
+ * these — see publicApi.ts:737-778 (the only fields the schema accepts).
+ *
+ * Singletons here: the field is silently dropped to keep the create
+ * succeeding. Templates that explicitly set them (e.g. `currency`, `clientEmail`)
+ * are still useful because the server side-effect is preserved (EUR default,
+ * client-doc snapshot respectively).
+ */
+const INVOICE_PHANTOM_FIELDS: ReadonlySet<string> = new Set([
+	// Strict schema does not accept `currency` on invoice create. The server
+	// defaults to EUR. Sending one is rejected with 400.
+	'currency',
+	// The server reads clientEmail from the client doc snapshot, not from
+	// the create body. Sending it is rejected by the strict schema.
+	'clientEmail',
+]);
+const QUOTE_PHANTOM_FIELDS: ReadonlySet<string> = new Set([
+	'currency',
+	'clientEmail',
+]);
+
 export class Frihet implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Frihet',
@@ -518,6 +542,13 @@ export class Frihet implements INodeType {
 			// =====================================================================
 			// MARK PAID — additional params
 			// =====================================================================
+			// NOTE: the ERP `POST /v1/invoices/{id}/paid` schema is strict zod
+			// accepting only `paidDate` (publicApi.ts:5832-5834). There is no
+			// `paymentMethod` field on the mark-paid endpoint — payment-method
+			// tracking lives on the legacy `payments[]` ledger (chatAgent
+			// path), the Stripe Connect `paymentDetails` field, or Payment
+			// Authority V1 (callable). See CONTRACT_MATRIX.md §Payment
+			// Authority.
 			{
 				displayName: 'Additional Fields',
 				name: 'markPaidAdditional',
@@ -537,20 +568,6 @@ export class Frihet implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Date of payment (ISO 8601: YYYY-MM-DD). Defaults to today.',
-					},
-					{
-						displayName: 'Payment Method',
-						name: 'paymentMethod',
-						type: 'options',
-						default: 'bank_transfer',
-						options: [
-							{ name: 'Bank Transfer', value: 'bank_transfer' },
-							{ name: 'Cash', value: 'cash' },
-							{ name: 'Card', value: 'card' },
-							{ name: 'Stripe', value: 'stripe' },
-							{ name: 'PayPal', value: 'paypal' },
-							{ name: 'Other', value: 'other' },
-						],
 					},
 				],
 			},
@@ -1462,48 +1479,62 @@ export class Frihet implements INodeType {
 
 				// ===================================================================
 				// LIST — paginated
+				// ERP list response shape (publicApi.ts:7705):
+				//   { data, total, limit, offset, nextCursor }
+				// `nextCursor` is base64url-encoded JSON `{__id: <docId>}` and lives
+				// at the response root, NOT under `meta`. Passing the cursor back
+				// in the next call's `?cursor=<base64url>` query advances the page.
 				// ===================================================================
 				else if (operation === 'list') {
 					const returnAll = this.getNodeParameter('returnAll', i) as boolean;
 					const filters = this.getNodeParameter('filters', i, {}) as IDataObject;
 
-					// Build query string params
+					// Build query string params (schema-allowed keys only).
+					// Forward any filter key the user has set — the server's
+					// list-family endpoints accept a richer set per resource
+					// (`stage`, `category`, `vendorId`, `seriesId`, `isActive`)
+					// but the n8n UI only exposes the union of the most common
+					// five. Honoring extras keeps templates that pass through
+					// raw API contracts working.
 					const qs: Record<string, any> = {};
-					if (filters.status) qs.status = filters.status;
-					if (filters.from) qs.from = filters.from;
-					if (filters.to) qs.to = filters.to;
-					if (filters.q) qs.q = filters.q;
-					if (filters.clientId) qs.clientId = filters.clientId;
+					for (const [k, v] of Object.entries(filters)) {
+						if (v === '' || v === null || v === undefined) continue;
+						qs[k] = v;
+					}
 
 					if (returnAll) {
 						// Paginate through all pages
 						let allItems: IDataObject[] = [];
-						let after: string | undefined;
+						let cursor: string | undefined;
 
 						do {
-							const pageQs = { ...qs, limit: 100, ...(after ? { after } : {}) };
+							const pageQs: Record<string, any> = { ...qs, limit: 100, ...(cursor ? { cursor } : {}) };
 							const response = await frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
 							const pageItems: IDataObject[] = response?.data ?? [];
 							allItems = allItems.concat(pageItems);
-							after = response?.meta?.nextCursor;
-							if (!response?.meta?.hasMore) break;
-						} while (after);
+							cursor = response?.nextCursor;
+						} while (cursor);
 
 						returnData.push(...allItems);
 					} else {
 						const limit = this.getNodeParameter('limit', i) as number;
-						const after = this.getNodeParameter('after', i, '') as string;
+						const cursor = this.getNodeParameter('after', i, '') as string;
 
 						const pageQs: Record<string, any> = { ...qs, limit };
-						if (after) pageQs.after = after;
+						if (cursor) pageQs.cursor = cursor;
 
 						const response = await frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
 						const pageItems: IDataObject[] = response?.data ?? [];
-						// Include pagination meta as a wrapper so workflows can use nextCursor
+						// Surface a single wrapper with the next cursor so workflows
+						// can walk the cursor across iterations.
 						if (pageItems.length > 0) {
 							returnData.push(...pageItems);
 						} else {
-							returnData.push({ items: [], meta: response?.meta ?? {} });
+							returnData.push({
+								items: [],
+								nextCursor: response?.nextCursor ?? null,
+								total: response?.total ?? 0,
+							});
 						}
 					}
 				}
@@ -1527,6 +1558,7 @@ export class Frihet implements INodeType {
 					// Merge additional fields, stripping empty strings and parsing JSON
 					for (const [key, val] of Object.entries(additional)) {
 						if (val === '' || val === null || val === undefined) continue;
+						if (INVOICE_PHANTOM_FIELDS.has(key)) continue;
 						if (key === 'clientAddress') {
 							try { body.clientAddress = typeof val === 'string' ? JSON.parse(val) : val; }
 							catch { /* ignore malformed JSON */ }
@@ -1557,6 +1589,7 @@ export class Frihet implements INodeType {
 
 					for (const [key, val] of Object.entries(additional)) {
 						if (val === '' || val === null || val === undefined) continue;
+						if (QUOTE_PHANTOM_FIELDS.has(key)) continue;
 						if (key === 'clientAddress') {
 							try { body.clientAddress = typeof val === 'string' ? JSON.parse(val) : val; }
 							catch { /* ignore */ }
@@ -1694,6 +1727,12 @@ export class Frihet implements INodeType {
 
 				// ===================================================================
 				// SEND — invoice or quote email
+				// ERP sendSchema is strict zod: { recipientEmail, recipientName?,
+				// customMessage?, locale?: 'es'|'en' } (publicApi.ts:5690-5695).
+				// The previous implementation sent `email:` which the schema
+				// rejected with 400. The n8n parameter is still named
+				// `sendEmail` for UX continuity; the wire field is
+				// `recipientEmail`.
 				// ===================================================================
 				else if (operation === 'send') {
 					const idParam = `${resource}Id`;
@@ -1701,7 +1740,7 @@ export class Frihet implements INodeType {
 					const emailOverride = this.getNodeParameter('sendEmail', i, '') as string;
 
 					const body: IDataObject = {};
-					if (emailOverride) body.email = emailOverride;
+					if (emailOverride) body.recipientEmail = emailOverride;
 
 					const response = await frihetApiRequest.call(this, 'POST', `/${endpoint}/${id}/send`, body);
 					returnData.push(response?.data ?? response ?? { id, sent: true });
@@ -1710,13 +1749,16 @@ export class Frihet implements INodeType {
 				// ===================================================================
 				// MARK PAID — invoice only
 				// ===================================================================
+				// ERP body schema is strict zod accepting only `paidDate`
+				// (publicApi.ts:5832-5834). No `paymentMethod` field — payment-
+				// method tracking lives on the legacy `payments[]` ledger,
+				// Stripe Connect `paymentDetails`, or Payment Authority V1.
 				else if (operation === 'markPaid') {
 					const id = this.getNodeParameter('invoiceId', i) as string;
 					const markPaidAdditional = this.getNodeParameter('markPaidAdditional', i, {}) as IDataObject;
 
 					const body: IDataObject = {};
 					if (markPaidAdditional.paidDate) body.paidDate = markPaidAdditional.paidDate;
-					if (markPaidAdditional.paymentMethod) body.paymentMethod = markPaidAdditional.paymentMethod;
 
 					const response = await frihetApiRequest.call(this, 'POST', `/invoices/${id}/paid`, body);
 					returnData.push(response?.data ?? response ?? { id, paid: true });
