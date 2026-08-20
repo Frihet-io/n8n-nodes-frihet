@@ -5,6 +5,68 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] - 2026-08-20
 
+### R3 — second-pass corrections (control-plane CI live finding)
+
+#### Fixed (R3)
+
+- **`npm ci` deterministic install.** CI run 32398192990 was RED on
+  Node 22: `npm ci` requires `package.json` and `package-lock.json`
+  to be in sync, but the R1/R2 lockfile was a snapshot of
+  `version 1.0.0` and did not include the R2 devDeps
+  (`jest@30.4.2`, `ts-jest@29.4.11`, `@types/jest@30.0.0`).
+  Regenerated `package-lock.json` from the exact `package.json`
+  via `npm install --package-lock-only` — 362 packages, lockfile
+  version 3, `package.json` version 1.0.1. **Clean-checkout
+  verification**: `npm ci --no-audit --no-fund && npm run build
+  && npm test` — green, 66/66 tests, no warnings beyond the
+  pre-existing upstream `inflight` / `glob@7` deprecation
+  notices that the vendored tree already carries. **Do not
+  weaken CI to `npm install`** — `npm ci` is the deterministic
+  install contract.
+- **Phantom `@frihet/mcp-server` Payment Authority tool
+  removed.** R2 docs (CONTRACT_MATRIX, README, CHANGELOG, the
+  node's error message) pointed to a non-existent `@frihet/mcp-server`
+  Payment Authority tool. Reverified at `berthelius/frihet-mcp
+  origin/main = 30534c8e1764ef1719413d86243e28ca521dae87`:
+  no `postInvoicePaymentV1`, no `reverseInvoicePaymentV1`, no
+  `listInvoicePaymentsV1` — only `mark_invoice_paid` which wraps
+  the same legacy REST endpoint and carries the same
+  `AUTHORITY_MISSING` risk. **Replaced** the phantom guidance
+  with: "use the Frihet app's Payment Authority V1 UI (which
+  calls the `postInvoicePaymentV1` Firebase Callable) — the only
+  supported surface today." All R2 fixes preserved.
+- **Vendored `node_modules/` updated to match the new lockfile.**
+  The clean-checkout install (362 packages) replaced the
+  pre-existing vendored tree. The new tree SHA differs from
+  the previous `7c0ec1c...` because the install picked up
+  the lockfile's pinned transitives. CI uses `npm ci` (no
+  reliance on the vendored tree); the vendored copy is the
+  offline fallback for users who can't reach the npm registry.
+- **Frihet MCP Server version reference updated** from
+  `@1.12.0` (R1) / `@1.12.0` (R2) to `@1.16.6` (R3, current
+  frihet-mcp main `30534c8`).
+
+#### Preserved from R2 (no regressions)
+
+- 5 R1 defects: `markPaid` phantom `paymentMethod` removed,
+  `send` body uses `recipientEmail`, list pagination uses
+  `cursor` + `nextCursor` at response root, invoice create
+  strips `currency` / `clientEmail` phantom fields, webhook
+  template envelope corrected to `{ client: {...} }` /
+  `{ quote: {...} }`.
+- 5 R2 BLOCKERS: B3 `sendEmail` required with email regex, B7
+  `truncated` flag surfaced, B8 test foundation (devDeps,
+  `npm test`, GitHub CI on Node 20/22), B1/B2 Payment Authority
+  V1 hard fail-closed, B4/B5 two templates quarantined to
+  `templates/unverified-webhooks/`, B6 Shopify address JSON +
+  Liquid `.trim()` + Stripe `Pin Invoice Id`, B9
+  `invoice:update` status mutation marked as server residual.
+- 66-test real-handler foundation
+  (`tests/contract/invoice.test.ts` 18 tests,
+  `tests/contract/templates.test.ts` 41 assertions,
+  `tests/contract/webhook-expressions.test.ts` 7 tests,
+  `tests/_helpers/n8n-mock.ts` + `tests/_helpers/n8n-expression.ts`).
+
 ### R2 — second audit (canonical `berthelius/Frihet-ERP origin/main = d5f3f3cd`)
 
 #### Fixed (R2 BLOCKERS)
@@ -163,8 +225,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   safe, ready-to-use set.
 - `paymentAuthorityVersion` exposes the V1 cut marker; the
   node pre-fetches and fail-closes V1 invoices on `markPaid`.
-  Use the `@frihet/mcp-server` Payment Authority tool for V1
-  write operations.
+  For V1 mark-paid, use the Frihet app's Payment Authority V1
+  UI (which calls the `postInvoicePaymentV1` Firebase Callable).
+  The `@frihet/mcp-server` (main `30534c8`) does NOT expose a
+  V1 write tool — its `mark_invoice_paid` wraps the same legacy
+  REST endpoint and has the same divergence risk.
 
 ## [1.0.1] - 2026-06-15
 

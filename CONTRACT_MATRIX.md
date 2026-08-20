@@ -30,6 +30,8 @@ sandboxed evaluator against the actual Frihet webhook payload.
 | Defects fixed in this PR | 5 (R1) + 5 (R2) |
 | Coverage of the public REST surface | **~20 %** |
 | Coverage of the full ERP API (incl. callable CFs, MCP) | **~5 %** |
+| R3 lockfile regen | `package-lock.json` in sync with `package.json` (362 packages, version 1.0.1, lockfile 3) |
+| R3 docs correction | Phantom `@frihet/mcp-server` Payment Authority tool removed — reverified at `berthelius/frihet-mcp origin/main = 30534c8`, no V1 write tool exists. Pointed to the Frihet app UI instead. |
 
 R2 BLOCKERS closed:
 
@@ -233,15 +235,25 @@ if (v1 === 1) {
   throw new NodeOperationError(this.getNode(),
     `Invoice ${id} has paymentAuthorityVersion=1 (Payment Authority V1 cut marker). ` +
     `The legacy REST /paid endpoint does NOT update V1's forward-only ledger... ` +
-    `Use the Payment Authority V1 callable (postInvoicePaymentV1) directly, or use ` +
-    `the @frihet/mcp-server Payment Authority tool. The legacy markPaid action is ` +
-    `BLOCKED for V1 invoices.`);
+    `To mark this V1 invoice paid, use the Frihet app's Payment Authority V1 UI — ` +
+    `it calls postInvoicePaymentV1 (a Firebase Callable) and is the only supported ` +
+    `surface today. The @frihet/mcp-server (main 30534c8) does NOT expose a V1 write ` +
+    `tool — its mark_invoice_paid wraps the same legacy REST endpoint and has the same ` +
+    `divergence risk. The legacy markPaid action is BLOCKED for V1 invoices.`);
 }
 ```
 
-`postInvoicePaymentV1` is a Firebase callable, not REST. The n8n
-community node does NOT expose a callable bridge. The user can use
-the `@frihet/mcp-server` tool which wraps the callable.
+`postInvoicePaymentV1` is a Firebase callable, not REST. The
+R2 (and R1) docs pointed to a phantom `@frihet/mcp-server`
+"Payment Authority tool" that does NOT exist. R3 reverified
+`berthelius/frihet-mcp origin/main = 30534c8e1764ef1719413d86243e28ca521dae87`:
+no `postInvoicePaymentV1`, no `reverseInvoicePaymentV1`, no
+`listInvoicePaymentsV1` — only `mark_invoice_paid` (which wraps
+the same legacy REST endpoint). The n8n community node does
+NOT expose a callable bridge. The actual supported surface for
+V1 mark-paid is the **Frihet app's Payment Authority V1 UI**,
+which calls `postInvoicePaymentV1` (a Firebase Callable, not
+REST, not MCP).
 
 ---
 
@@ -481,10 +493,32 @@ jest.config.js                                         — minimal ts-jest
 tsconfig.test.json                                     — test tsconfig
 tsconfig.json                                          — excludes tests/
 package.json                                           — npm test, devDeps pinned
-.github/workflows/ci.yml                               — NEW (R2): CI on Node 20/22
+package-lock.json                                     — R3 regen: in sync with package.json (npm ci green)
+.github/workflows/ci.yml                               — R2: CI on Node 20/22 (R3 verified)
 .gitignore                                             — node_modules hygiene
 CONTRACT_MATRIX.md                                     — this file
 ```
 
+**R3 changes** (canonical `berthelius/frihet-mcp origin/main = 30534c8`):
+- `nodes/Frihet/Frihet.node.ts` — error message updated to point to
+  the Frihet app's Payment Authority V1 UI instead of the
+  phantom `@frihet/mcp-server` tool.
+- `README.md` — operations table note + Roadmap + MCP Server
+  reference updated to remove the phantom tool and reflect the
+  current `mcp-server@1.16.6` version.
+- `CHANGELOG.md` — R3 section added (lockfile regen + phantom
+  MCP tool removed + vendored node_modules updated to match
+  the new lockfile).
+- `CONTRACT_MATRIX.md` — §4.3 (B1/B2) updated with the actual
+  Frihet-mcp main SHA + the honest "no V1 write tool" finding;
+  §13 files-touched table updated.
+
 No `package.json` version bump, no `npm publish`, no credentials
-mutation, no backend change.
+mutation, no backend change. `package-lock.json` was the only
+file mutated by the dependency-resolution step. The vendored
+`node_modules/` was reinstalled from the new lockfile to keep
+the offline fallback in sync (the install picked up additional
+lockfile-pinned transitives, so the new tree SHA differs from
+the previous `7c0ec1c...`). CI uses `npm ci` (not the vendored
+tree), so this is independent of the deterministic install
+contract.

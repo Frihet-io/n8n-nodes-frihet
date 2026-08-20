@@ -1759,7 +1759,7 @@ class Frihet {
                     const invoiceDoc = (invoiceRead?.data ?? invoiceRead);
                     const v1 = invoiceDoc?.paymentAuthorityVersion;
                     if (v1 === 1) {
-                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), `Invoice ${id} has paymentAuthorityVersion=1 (Payment Authority V1 cut marker). The legacy REST /paid endpoint does NOT update V1's forward-only ledger and will create AUTHORITY_MISSING / PROJECTION_DRIFT divergence. Use the Payment Authority V1 callable (postInvoicePaymentV1) directly, or use the @frihet/mcp-server Payment Authority tool. The legacy markPaid action is BLOCKED for V1 invoices.`, { itemIndex: i });
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), `Invoice ${id} has paymentAuthorityVersion=1 (Payment Authority V1 cut marker). The legacy REST /paid endpoint does NOT update V1's forward-only ledger and will create AUTHORITY_MISSING / PROJECTION_DRIFT divergence. To mark this V1 invoice paid, use the Frihet app's Payment Authority V1 UI — it calls postInvoicePaymentV1 (a Firebase Callable) and is the only supported surface today. The @frihet/mcp-server (main 30534c8) does NOT expose a V1 write tool — its mark_invoice_paid wraps the same legacy REST endpoint and has the same divergence risk. The legacy markPaid action is BLOCKED for V1 invoices.`, { itemIndex: i });
                     }
                     const body = {};
                     if (markPaidAdditional.paidDate)

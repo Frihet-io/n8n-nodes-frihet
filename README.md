@@ -34,10 +34,14 @@ Then restart your n8n instance. The Frihet node will appear in the node palette 
 
 > **Note on `Mark Paid`:** the `POST /v1/invoices/{id}/paid` endpoint
 > mutates `status` only. The node pre-fetches the invoice and
-> **fail-closes on `paymentAuthorityVersion === 1`** (Payment Authority
-> V1) — the legacy endpoint would create an `AUTHORITY_MISSING`
-> divergence. For V1, use the `@frihet/mcp-server` Payment Authority
-> tool (the V1 ledger is callable-only, not REST).
+> **fail-closes on `paymentAuthorityVersion === 1`** (Payment
+> Authority V1) — the legacy endpoint would create an
+> `AUTHORITY_MISSING` divergence. For V1 mark-paid, use the Frihet
+> app's Payment Authority V1 UI (which calls the
+> `postInvoicePaymentV1` Firebase Callable) — the only supported
+> surface today. The `@frihet/mcp-server` does NOT expose a V1
+> write tool; its `mark_invoice_paid` wraps the same legacy REST
+> endpoint and carries the same divergence risk.
 >
 > **Note on `send`:** the `recipientEmail` field is **required** —
 > there is no server-side default to the client's email. The
@@ -88,9 +92,11 @@ surface** — the 6 generic CRUD resources out of ~30 route families in
 mutates `status`, `paidAt`, and `updatedAt`. It does NOT create a payment
 record. The node **fail-closes on V1 invoices** (B1/B2) — the legacy
 endpoint would create an `AUTHORITY_MISSING` divergence on a
-Payment-Authority-V1-enabled workspace. For V1 writes, use the
-[@frihet/mcp-server](https://www.npmjs.com/package/@frihet/mcp-server)
-Payment Authority tool (V1 ledger is callable-only, not REST).
+Payment-Authority-V1-enabled workspace. For V1 writes, use the Frihet
+app's Payment Authority V1 UI (which calls the `postInvoicePaymentV1`
+Firebase Callable). The `@frihet/mcp-server` does NOT currently expose
+a V1 write tool — its `mark_invoice_paid` wraps the same legacy REST
+endpoint and has the same divergence risk.
 
 **`send` payload:** the `recipientEmail` field is **required** by the
 server's strict zod schema (`publicApi.ts:5690-5695`). The n8n UI
@@ -118,7 +124,7 @@ HMAC signature. See `CONTRACT_MATRIX.md` §6.
 - `Idempotency-Key` propagation on fiscal writes (currently the node does
   not emit it; retries of fiscal writes can produce duplicate fiscal numbers)
 
-The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server) (`@frihet/mcp-server@1.12.0`) exposes the full API surface (151 tools, native ES/EU fiscal compliance including VeriFactu/TicketBAI/Facturae) and is available today for AI agent workflows.
+The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server) (`@frihet/mcp-server@1.16.6` at frihet-mcp main `30534c8`) exposes 157 canonical operations for invoicing, expenses, CRM, banking, POS, and ES/EU fiscal workflows, with conservative capability and side-effect metadata. **It does NOT expose a Payment Authority V1 write tool** — its `mark_invoice_paid` wraps the same legacy REST endpoint and has the same V1 divergence risk. Use the Frihet app's Payment Authority V1 UI for V1 mark-paid.
 
 ## Links
 
