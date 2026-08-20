@@ -3,6 +3,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Frihet = void 0;
 const n8n_workflow_1 = require("n8n-workflow");
 const GenericFunctions_1 = require("./GenericFunctions");
+/**
+ * Fields that the n8n node UI exposes (or templates pass via
+ * fixedCollection parameters) but the ERP publicApi strict-zod schema
+ * rejects on invoice create. The server has its own defaults/cross-resolves
+ * these — see publicApi.ts:737-778 (the only fields the schema accepts).
+ *
+ * Singletons here: the field is silently dropped to keep the create
+ * succeeding. Templates that explicitly set them (e.g. `currency`, `clientEmail`)
+ * are still useful because the server side-effect is preserved (EUR default,
+ * client-doc snapshot respectively).
+ */
+const INVOICE_PHANTOM_FIELDS = new Set([
+    // Strict schema does not accept `currency` on invoice create. The server
+    // defaults to EUR. Sending one is rejected with 400.
+    'currency',
+    // The server reads clientEmail from the client doc snapshot, not from
+    // the create body. Sending it is rejected by the strict schema.
+    'clientEmail',
+]);
+const QUOTE_PHANTOM_FIELDS = new Set([
+    'currency',
+    'clientEmail',
+]);
 class Frihet {
     constructor() {
         this.description = {
@@ -482,10 +505,17 @@ class Frihet {
                 // =====================================================================
                 // INVOICE SEND — additional params
                 // =====================================================================
+                // The ERP sendSchema (publicApi.ts:5690-5695) is strict zod with
+                // `recipientEmail` REQUIRED. There is NO server-side fallback to
+                // the client's email (the R1 description lied — defaulting to
+                // client email was a phantom assumption). We require the field
+                // explicitly so the editor surfaces the gap before the run, and
+                // so the wire body is always valid.
                 {
-                    displayName: 'Email',
+                    displayName: 'Recipient Email',
                     name: 'sendEmail',
                     type: 'string',
+                    required: true,
                     default: '',
                     displayOptions: {
                         show: {
@@ -493,11 +523,30 @@ class Frihet {
                             operation: ['send'],
                         },
                     },
-                    description: 'Override recipient email (uses client email by default)',
+                    placeholder: '[email protected]',
+                    description: 'Recipient email. Required by the ERP sendSchema (publicApi.ts:5690-5695). There is no server-side default to the client email — the field must be supplied or the server returns 400.',
+                    typeOptions: {
+                        validation: [
+                            {
+                                type: 'regex',
+                                properties: {
+                                    regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+                                    errorMessage: 'Must be a valid email address',
+                                },
+                            },
+                        ],
+                    },
                 },
                 // =====================================================================
                 // MARK PAID — additional params
                 // =====================================================================
+                // NOTE: the ERP `POST /v1/invoices/{id}/paid` schema is strict zod
+                // accepting only `paidDate` (publicApi.ts:5832-5834). There is no
+                // `paymentMethod` field on the mark-paid endpoint — payment-method
+                // tracking lives on the legacy `payments[]` ledger (chatAgent
+                // path), the Stripe Connect `paymentDetails` field, or Payment
+                // Authority V1 (callable). See CONTRACT_MATRIX.md §Payment
+                // Authority.
                 {
                     displayName: 'Additional Fields',
                     name: 'markPaidAdditional',
@@ -517,20 +566,6 @@ class Frihet {
                             type: 'string',
                             default: '',
                             description: 'Date of payment (ISO 8601: YYYY-MM-DD). Defaults to today.',
-                        },
-                        {
-                            displayName: 'Payment Method',
-                            name: 'paymentMethod',
-                            type: 'options',
-                            default: 'bank_transfer',
-                            options: [
-                                { name: 'Bank Transfer', value: 'bank_transfer' },
-                                { name: 'Cash', value: 'cash' },
-                                { name: 'Card', value: 'card' },
-                                { name: 'Stripe', value: 'stripe' },
-                                { name: 'PayPal', value: 'paypal' },
-                                { name: 'Other', value: 'other' },
-                            ],
                         },
                     ],
                 },
@@ -1421,51 +1456,87 @@ class Frihet {
                 }
                 // ===================================================================
                 // LIST — paginated
+                // ERP list response shape (publicApi.ts:7705):
+                //   { data, total, limit, offset, nextCursor }
+                // `nextCursor` is base64url-encoded JSON `{__id: <docId>}` and lives
+                // at the response root, NOT under `meta`. Passing the cursor back
+                // in the next call's `?cursor=<base64url>` query advances the page.
+                //
+                // TRUNCATION: the `q`/`search` path and the offset-fallback scan
+                // saturate at 500 docs (publicApi.ts:7574, :7596). The server
+                // emits `truncated: true` in that case even though nextCursor is
+                // absent. We surface the flag on the final item so the workflow
+                // author can detect (and remediate) an incomplete pagination.
                 // ===================================================================
                 else if (operation === 'list') {
                     const returnAll = this.getNodeParameter('returnAll', i);
                     const filters = this.getNodeParameter('filters', i, {});
-                    // Build query string params
+                    // Build query string params (schema-allowed keys only).
+                    // Forward any filter key the user has set — the server's
+                    // list-family endpoints accept a richer set per resource
+                    // (`stage`, `category`, `vendorId`, `seriesId`, `isActive`)
+                    // but the n8n UI only exposes the union of the most common
+                    // five. Honoring extras keeps templates that pass through
+                    // raw API contracts working.
                     const qs = {};
-                    if (filters.status)
-                        qs.status = filters.status;
-                    if (filters.from)
-                        qs.from = filters.from;
-                    if (filters.to)
-                        qs.to = filters.to;
-                    if (filters.q)
-                        qs.q = filters.q;
-                    if (filters.clientId)
-                        qs.clientId = filters.clientId;
+                    for (const [k, v] of Object.entries(filters)) {
+                        if (v === '' || v === null || v === undefined)
+                            continue;
+                        qs[k] = v;
+                    }
                     if (returnAll) {
                         // Paginate through all pages
                         let allItems = [];
-                        let after;
+                        let cursor;
+                        let truncated = false;
                         do {
-                            const pageQs = { ...qs, limit: 100, ...(after ? { after } : {}) };
+                            const pageQs = { ...qs, limit: 100, ...(cursor ? { cursor } : {}) };
                             const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
                             const pageItems = response?.data ?? [];
                             allItems = allItems.concat(pageItems);
-                            after = response?.meta?.nextCursor;
-                            if (!response?.meta?.hasMore)
+                            cursor = response?.nextCursor;
+                            if (response?.truncated === true)
+                                truncated = true;
+                            // Belt-and-braces: if the server reports truncated but
+                            // also no nextCursor, terminate the loop. If nextCursor
+                            // IS present alongside truncated, the next page might
+                            // still be honored by the server but the docs say it
+                            // can repeat/skip — stop here loudly.
+                            if (truncated)
                                 break;
-                        } while (after);
+                        } while (cursor);
                         returnData.push(...allItems);
+                        if (truncated) {
+                            returnData.push({
+                                _truncated: true,
+                                reason: 'Backend returned truncated:true. The q/search path or offset-fallback scan saturated at 500 docs (publicApi.ts:7574, :7596). Pagination is incomplete — narrow the filter or page more explicitly.',
+                            });
+                        }
                     }
                     else {
                         const limit = this.getNodeParameter('limit', i);
-                        const after = this.getNodeParameter('after', i, '');
+                        const cursor = this.getNodeParameter('after', i, '');
                         const pageQs = { ...qs, limit };
-                        if (after)
-                            pageQs.after = after;
+                        if (cursor)
+                            pageQs.cursor = cursor;
                         const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
                         const pageItems = response?.data ?? [];
-                        // Include pagination meta as a wrapper so workflows can use nextCursor
                         if (pageItems.length > 0) {
                             returnData.push(...pageItems);
+                            if (response?.truncated === true) {
+                                returnData.push({
+                                    _truncated: true,
+                                    reason: 'Backend returned truncated:true on this page. Pagination is incomplete.',
+                                });
+                            }
                         }
                         else {
-                            returnData.push({ items: [], meta: response?.meta ?? {} });
+                            returnData.push({
+                                items: [],
+                                nextCursor: response?.nextCursor ?? null,
+                                total: response?.total ?? 0,
+                                truncated: response?.truncated === true,
+                            });
                         }
                     }
                 }
@@ -1485,6 +1556,8 @@ class Frihet {
                     // Merge additional fields, stripping empty strings and parsing JSON
                     for (const [key, val] of Object.entries(additional)) {
                         if (val === '' || val === null || val === undefined)
+                            continue;
+                        if (INVOICE_PHANTOM_FIELDS.has(key))
                             continue;
                         if (key === 'clientAddress') {
                             try {
@@ -1514,6 +1587,8 @@ class Frihet {
                     const body = { clientName, items: items_ };
                     for (const [key, val] of Object.entries(additional)) {
                         if (val === '' || val === null || val === undefined)
+                            continue;
+                        if (QUOTE_PHANTOM_FIELDS.has(key))
                             continue;
                         if (key === 'clientAddress') {
                             try {
@@ -1638,28 +1713,57 @@ class Frihet {
                 }
                 // ===================================================================
                 // SEND — invoice or quote email
+                // ERP sendSchema is strict zod: { recipientEmail, recipientName?,
+                // customMessage?, locale?: 'es'|'en' } (publicApi.ts:5690-5695).
+                // The previous implementation sent `email:` which the schema
+                // rejected with 400. The n8n parameter is still named
+                // `sendEmail` for UX continuity; the wire field is
+                // `recipientEmail`.
                 // ===================================================================
                 else if (operation === 'send') {
                     const idParam = `${resource}Id`;
                     const id = this.getNodeParameter(idParam, i);
                     const emailOverride = this.getNodeParameter('sendEmail', i, '');
-                    const body = {};
-                    if (emailOverride)
-                        body.email = emailOverride;
+                    // sendSchema requires recipientEmail (publicApi.ts:5690-5695).
+                    // The UI marks the field as required, but defensive check:
+                    // surface a clear error to the workflow author instead of
+                    // letting the server 400 on empty body.
+                    if (!emailOverride || !emailOverride.trim()) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), 'recipientEmail is required by the ERP sendSchema (publicApi.ts:5690-5695). Set the “Recipient Email” parameter on the node.', { itemIndex: i });
+                    }
+                    const body = { recipientEmail: emailOverride.trim() };
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', `/${endpoint}/${id}/send`, body);
                     returnData.push(response?.data ?? response ?? { id, sent: true });
                 }
                 // ===================================================================
                 // MARK PAID — invoice only
                 // ===================================================================
+                // ERP body schema is strict zod accepting only `paidDate`
+                // (publicApi.ts:5832-5834). No `paymentMethod` field — payment-
+                // method tracking lives on the legacy `payments[]` ledger,
+                // Stripe Connect `paymentDetails`, or Payment Authority V1.
+                //
+                // PAYMENT AUTHORITY V1 (B1/B2 hard fail): the V1 ledger is
+                // forward-only and runs as a Firebase Callable, not REST.
+                // The legacy `/paid` endpoint does NOT check the V1 cut marker
+                // (publicApi.ts:5827-5859 does not reference paymentAuthorityVersion)
+                // — so calling it on a V1 invoice silently creates an
+                // AUTHORITY_MISSING / PROJECTION_DRIFT divergence (see
+                // paymentAuthorityV1.ts:501-502, :881, :1346). We pre-fetch
+                // the invoice and fail closed on V1.
                 else if (operation === 'markPaid') {
                     const id = this.getNodeParameter('invoiceId', i);
                     const markPaidAdditional = this.getNodeParameter('markPaidAdditional', i, {});
+                    // Pre-fetch the invoice to detect Payment Authority V1.
+                    const invoiceRead = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/invoices/${id}`);
+                    const invoiceDoc = (invoiceRead?.data ?? invoiceRead);
+                    const v1 = invoiceDoc?.paymentAuthorityVersion;
+                    if (v1 === 1) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), `Invoice ${id} has paymentAuthorityVersion=1 (Payment Authority V1 cut marker). The legacy REST /paid endpoint does NOT update V1's forward-only ledger and will create AUTHORITY_MISSING / PROJECTION_DRIFT divergence. To mark this V1 invoice paid, use the Frihet app's Payment Authority V1 UI — it calls postInvoicePaymentV1 (a Firebase Callable) and is the only supported surface today. The @frihet/mcp-server (main 30534c8) does NOT expose a V1 write tool — its mark_invoice_paid wraps the same legacy REST endpoint and has the same divergence risk. The legacy markPaid action is BLOCKED for V1 invoices.`, { itemIndex: i });
+                    }
                     const body = {};
                     if (markPaidAdditional.paidDate)
                         body.paidDate = markPaidAdditional.paidDate;
-                    if (markPaidAdditional.paymentMethod)
-                        body.paymentMethod = markPaidAdditional.paymentMethod;
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', `/invoices/${id}/paid`, body);
                     returnData.push(response?.data ?? response ?? { id, paid: true });
                 }

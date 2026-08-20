@@ -13,6 +13,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["nodes/**/*.ts", "credentials/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+	"include": ["nodes/**/*.ts", "credentials/**/*.ts"],
+	"exclude": ["node_modules", "dist", "tests"]
 }

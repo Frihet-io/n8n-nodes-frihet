@@ -37,18 +37,12 @@
             },
             {
               "id": "field-004",
-              "name": "currency",
-              "value": "={{ $json.data.object.currency.toUpperCase() }}",
-              "type": "string"
-            },
-            {
-              "id": "field-005",
               "name": "description",
               "value": "={{ $json.data.object.description || 'Payment via Stripe' }}",
               "type": "string"
             },
             {
-              "id": "field-006",
+              "id": "field-005",
               "name": "paymentIntentId",
               "value": "={{ $json.data.object.id }}",
               "type": "string"
@@ -78,8 +72,6 @@
           ]
         },
         "invoiceAdditional": {
-          "clientEmail": "={{ $json.clientEmail }}",
-          "currency": "={{ $json.currency }}",
           "notes": "={{ 'Stripe Payment ID: ' + $json.paymentIntentId }}"
         }
       },
@@ -97,11 +89,36 @@
     },
     {
       "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pin-001",
+              "name": "invoiceId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "pin-002",
+              "name": "clientEmail",
+              "value": "={{ $('Extract Payment Data').item.json.clientEmail }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "__VG_UUID_pin_001__",
+      "name": "Pin Invoice Id",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
         "resource": "invoice",
         "operation": "markPaid",
-        "invoiceId": "={{ $json.id }}",
+        "invoiceId": "={{ $json.invoiceId }}",
         "markPaidAdditional": {
-          "paymentMethod": "stripe",
           "paidDate": "={{ new Date().toISOString().split('T')[0] }}"
         }
       },
@@ -109,7 +126,7 @@
       "name": "Mark Invoice Paid",
       "type": "n8n-nodes-frihet.frihet",
       "typeVersion": 1,
-      "position": [940, 300],
+      "position": [1170, 300],
       "credentials": {
         "frihetApi": {
           "id": "1",
@@ -121,14 +138,14 @@
       "parameters": {
         "resource": "invoice",
         "operation": "send",
-        "invoiceId": "={{ $json.id }}",
-        "sendEmail": "={{ $('Extract Payment Data').item.json.clientEmail }}"
+        "invoiceId": "={{ $json.invoiceId }}",
+        "sendEmail": "={{ $json.clientEmail }}"
       },
       "id": "a1b2c3d4-0001-4000-8000-000000000005",
       "name": "Send Invoice",
       "type": "n8n-nodes-frihet.frihet",
       "typeVersion": 1,
-      "position": [1170, 300],
+      "position": [1400, 300],
       "credentials": {
         "frihetApi": {
           "id": "1",
@@ -161,6 +178,17 @@
       ]
     },
     "Create Invoice": {
+      "main": [
+        [
+          {
+            "node": "Pin Invoice Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Invoice Id": {
       "main": [
         [
           {

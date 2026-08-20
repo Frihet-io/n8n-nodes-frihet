@@ -63,67 +63,67 @@
             {
               "id": "field-001",
               "name": "firstname",
-              "value": "={{ ($json.body.data.name || $json.data.name || '').split(' ')[0] }}",
+              "value": "={{ ($json.body.client.name || $json.client.name || '').split(' ')[0] }}",
               "type": "string"
             },
             {
               "id": "field-002",
               "name": "lastname",
-              "value": "={{ ($json.body.data.name || $json.data.name || '').split(' ').slice(1).join(' ') || '' }}",
+              "value": "={{ ($json.body.client.name || $json.client.name || '').split(' ').slice(1).join(' ') || '' }}",
               "type": "string"
             },
             {
               "id": "field-003",
               "name": "email",
-              "value": "={{ $json.body.data.email || $json.data.email || '' }}",
+              "value": "={{ $json.body.client.email || $json.client.email || '' }}",
               "type": "string"
             },
             {
               "id": "field-004",
               "name": "phone",
-              "value": "={{ $json.body.data.phone || $json.data.phone || '' }}",
+              "value": "={{ $json.body.client.phone || $json.client.phone || '' }}",
               "type": "string"
             },
             {
               "id": "field-005",
               "name": "company",
-              "value": "={{ $json.body.data.company || $json.data.company || $json.body.data.name || $json.data.name || '' }}",
+              "value": "={{ $json.body.client.name || $json.client.name || '' }}",
               "type": "string"
             },
             {
               "id": "field-006",
               "name": "address",
-              "value": "={{ $json.body.data.address || $json.data.address || '' }}",
+              "value": "={{ $json.body.client.address || $json.client.address || '' }}",
               "type": "string"
             },
             {
               "id": "field-007",
               "name": "city",
-              "value": "={{ $json.body.data.city || $json.data.city || '' }}",
+              "value": "={{ $json.body.client.address?.city || $json.client.address?.city || '' }}",
               "type": "string"
             },
             {
               "id": "field-008",
               "name": "country",
-              "value": "={{ $json.body.data.country || $json.data.country || '' }}",
+              "value": "={{ $json.body.client.address?.country || $json.client.address?.country || '' }}",
               "type": "string"
             },
             {
               "id": "field-009",
               "name": "taxId",
-              "value": "={{ $json.body.data.taxId || $json.data.taxId || '' }}",
+              "value": "={{ $json.body.client.taxId || $json.client.taxId || '' }}",
               "type": "string"
             },
             {
               "id": "field-010",
               "name": "frihetClientId",
-              "value": "={{ $json.body.data.id || $json.data.id }}",
+              "value": "={{ $json.body.client.id || $json.client.id }}",
               "type": "string"
             },
             {
               "id": "field-011",
               "name": "website",
-              "value": "={{ $json.body.data.website || $json.data.website || '' }}",
+              "value": "={{ $json.body.client.website || $json.client.website || '' }}",
               "type": "string"
             }
           ]
