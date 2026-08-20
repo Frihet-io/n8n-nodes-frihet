@@ -25,7 +25,7 @@
             {
               "id": "field-001",
               "name": "customerName",
-              "value": "={{ ($json.customer.first_name || '') + ' ' + ($json.customer.last_name || '') | trim || $json.billing_address.name || 'Shopify Customer' }}",
+              "value": "={{ (($json.customer.first_name || '') + ' ' + ($json.customer.last_name || '')).trim() || $json.billing_address.name || 'Shopify Customer' }}",
               "type": "string"
             },
             {
@@ -151,8 +151,10 @@
         "clientAdditional": {
           "email": "={{ $('Extract Order Data').item.json.customerEmail }}",
           "phone": "={{ $('Extract Order Data').item.json.customerPhone }}",
-          "city": "={{ $('Extract Order Data').item.json.billingCity }}",
-          "country": "={{ $('Extract Order Data').item.json.billingCountry }}"
+          "address": {
+            "city": "={{ $('Extract Order Data').item.json.billingCity }}",
+            "country": "={{ $('Extract Order Data').item.json.billingCountry }}"
+          }
         }
       },
       "id": "f6a7b8c9-0006-4000-8000-000000000005",

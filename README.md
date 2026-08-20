@@ -32,6 +32,18 @@ Then restart your n8n instance. The Frihet node will appear in the node palette 
 | Product | Create, Get, List, Update, Delete |
 | Vendor | Create, Get, List, Update, Delete |
 
+> **Note on `Mark Paid`:** the `POST /v1/invoices/{id}/paid` endpoint
+> mutates `status` only. The node pre-fetches the invoice and
+> **fail-closes on `paymentAuthorityVersion === 1`** (Payment Authority
+> V1) — the legacy endpoint would create an `AUTHORITY_MISSING`
+> divergence. For V1, use the `@frihet/mcp-server` Payment Authority
+> tool (the V1 ledger is callable-only, not REST).
+>
+> **Note on `send`:** the `recipientEmail` field is **required** —
+> there is no server-side default to the client's email. The
+> R1 description ("uses client email by default") was a phantom
+> assumption and is removed.
+
 ## Credentials
 
 1. In Frihet: **Settings → API → Generate API Key**
@@ -74,28 +86,35 @@ surface** — the 6 generic CRUD resources out of ~30 route families in
 
 **`markPaid` caveat:** the `POST /v1/invoices/{id}/paid` endpoint only
 mutates `status`, `paidAt`, and `updatedAt`. It does NOT create a payment
-record. If your workflow needs to record "the client paid by bank transfer
-on 2026-08-20", use the [@frihet/mcp-server](https://www.npmjs.com/package/@frihet/mcp-server)
-(`Payment Authority V1` tool) — the REST `/paid` endpoint alone is the
-state mutation, not the authoritative payment ledger.
+record. The node **fail-closes on V1 invoices** (B1/B2) — the legacy
+endpoint would create an `AUTHORITY_MISSING` divergence on a
+Payment-Authority-V1-enabled workspace. For V1 writes, use the
+[@frihet/mcp-server](https://www.npmjs.com/package/@frihet/mcp-server)
+Payment Authority tool (V1 ledger is callable-only, not REST).
 
-**`send` payload:** the n8n UI parameter is `sendEmail` for UX continuity,
-but the wire field is `recipientEmail` (strict zod on the server).
+**`send` payload:** the `recipientEmail` field is **required** by the
+server's strict zod schema (`publicApi.ts:5690-5695`). The n8n UI
+parameter is `sendEmail` for UX continuity; the wire field is
+`recipientEmail`. The previous R1 description ("uses client email by
+default") was a phantom — there is no server-side default.
 
-**Invoice create phantom fields:** `currency` and `clientEmail` are accepted
-in the n8n UI's `invoiceAdditional` collection for legacy reasons but the
-ERP strict-zod schema rejects them. The node strips them silently — the
-server defaults `currency` to EUR and resolves `clientEmail` from the client
-doc. See `CONTRACT_MATRIX.md` §3.1.A for the canonical schema.
+**Invoice create phantom fields:** `currency` and `clientEmail` are stripped
+defensively. The server defaults `currency` to EUR and resolves
+`clientEmail` from the client doc. See `CONTRACT_MATRIX.md` §3.1.A
+for the canonical schema.
 
-**Webhook payload:** the `client.created` and `quote.accepted` events
-deliver as `{ client: { id, ... } }` and `{ quote: { id, ... } }`
-respectively (the `X-Frihet-Event` header carries the event type).
+**Templates:** 6 of 8 templates in the `templates/` folder are
+ready-to-use. **2 templates (`new-client-to-hubspot`,
+`quote-accepted-to-invoice`) are quarantined to
+`templates/unverified-webhooks/`** — their event-type filter is broken
+(server emits `X-Frihet-Event` header, the body has no `event` key)
+and the receiving workflow has no n8n-native way to verify the
+HMAC signature. See `CONTRACT_MATRIX.md` §6.
 
 **Wave 2** — planned but not yet shipped:
 - Extended resource coverage (bank accounts, fiscal calendar, VeriFactu/TicketBAI signed-invoice flows, Facturae e-invoice export, payment splits)
-- n8n verified-node status (automated tests, CI provenance, community review)
-- Trigger nodes for Frihet webhooks (invoice paid, client created, etc.)
+- n8n verified-node status (community review, npm provenance)
+- HMAC-verified Frihet webhook trigger (replaces the unverified-webhooks templates)
 - `Idempotency-Key` propagation on fiscal writes (currently the node does
   not emit it; retries of fiscal writes can produce duplicate fiscal numbers)
 

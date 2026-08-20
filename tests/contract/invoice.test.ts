@@ -1,43 +1,105 @@
 /**
  * Contract tests — drives the actual Frihet node execute() against the
  * canonical ERP publicApi schema. The authority is berthelius/Frihet-ERP
- * origin/main = f901d4292dfd20438de34e21795f27683beaeb37.
+ * origin/main = d5f3f3cdfdead47880f611696d25066dcb2b8051.
  *
  * Each test reproduces a real defect observed in the n8n node vs the live
  * server contract. RED tests pin the contract; fixes turn them GREEN.
+ *
+ * The harness mocks `this.helpers.request` and captures every HTTP call so
+ * assertions can pin the wire shape. The transport is real (the same
+ * shape n8n emits at runtime); only the network leg is replaced.
  */
 import { Frihet } from '../../nodes/Frihet/Frihet.node';
-import { buildMockContext, lastRequest, type CapturedRequest } from '../_helpers/n8n-mock';
+import { buildMockContext, lastRequest } from '../_helpers/n8n-mock';
 
-describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
+describe('Frihet node — contract vs Frihet ERP publicApi d5f3f3cd', () => {
 	describe('invoice.markPaid', () => {
-		it('POST /v1/invoices/:id/paid sends ONLY paidDate (no paymentMethod)', async () => {
-			// ERP contract (publicApi.ts:5832-5834): strict zod schema with only
-			// paidDate. Any unknown key returns 400.
+		it('pre-fetches the invoice and POSTs /paid only when paymentAuthorityVersion !== 1', async () => {
+			// ERP contract: legacy /paid does NOT check paymentAuthorityVersion
+			// (publicApi.ts:5827-5859). V1 invoices diverge silently. The
+			// node pre-fetches and fails closed on V1.
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'invoice',
 					operation: 'markPaid',
-					invoiceId: 'inv_123',
-					markPaidAdditional: {
-						paidDate: '2026-08-15',
-						paymentMethod: 'bank_transfer', // <- phantom field — must be ignored
-					},
+					invoiceId: 'inv_legacy',
+					markPaidAdditional: { paidDate: '2026-08-15' },
 				},
-				responseFor: () => ({
-					data: { success: true, status: 'paid', paidAt: '2026-08-15' },
-				}),
+				responseFor: (req) => {
+					// First call: GET invoice (pre-fetch)
+					if (req.method === 'GET' && req.uri.endsWith('/v1/invoices/inv_legacy')) {
+						return { data: { id: 'inv_legacy', status: 'sent', paymentAuthorityVersion: undefined } };
+					}
+					// Second call: POST /paid
+					if (req.method === 'POST' && req.uri.endsWith('/v1/invoices/inv_legacy/paid')) {
+						return { data: { success: true, status: 'paid', paidAt: '2026-08-15' } };
+					}
+					throw new Error(`Unexpected request: ${req.method} ${req.uri}`);
+				},
 			});
 
 			await new Frihet().execute.call(ctx);
 
-			const req = lastRequest(captured);
-			// Pin the route
-			expect(req.method).toBe('POST');
-			expect(req.uri).toBe('https://api.frihet.io/v1/invoices/inv_123/paid');
-			// Pin the body shape — server rejects unknown keys
-			expect(Object.keys(req.body).sort()).toEqual(['paidDate']);
-			expect(req.body).toEqual({ paidDate: '2026-08-15' });
+			// Two requests: GET invoice, POST /paid
+			expect(captured.length).toBe(2);
+			expect(captured[0].method).toBe('GET');
+			expect(captured[0].uri).toBe('https://api.frihet.io/v1/invoices/inv_legacy');
+			expect(captured[1].method).toBe('POST');
+			expect(captured[1].uri).toBe('https://api.frihet.io/v1/invoices/inv_legacy/paid');
+			expect(captured[1].body).toEqual({ paidDate: '2026-08-15' });
+		});
+
+		it('FAILS CLOSED when invoice has paymentAuthorityVersion=1', async () => {
+			// V1 invoices must NOT be touched by the legacy endpoint.
+			const { ctx, captured } = buildMockContext({
+				params: {
+					resource: 'invoice',
+					operation: 'markPaid',
+					invoiceId: 'inv_v1',
+					markPaidAdditional: { paidDate: '2026-08-15' },
+				},
+				responseFor: (req) => {
+					if (req.method === 'GET' && req.uri.endsWith('/v1/invoices/inv_v1')) {
+						return { data: { id: 'inv_v1', status: 'sent', paymentAuthorityVersion: 1 } };
+					}
+					throw new Error(`Unexpected request: ${req.method} ${req.uri}`);
+				},
+			});
+
+			await expect(new Frihet().execute.call(ctx)).rejects.toThrow(/paymentAuthorityVersion=1/);
+
+			// Only the GET was issued. No POST /paid reached the wire.
+			expect(captured.length).toBe(1);
+			expect(captured[0].method).toBe('GET');
+		});
+
+		it('POST /v1/invoices/:id/paid body contains only paidDate (no paymentMethod)', async () => {
+			// Even if the user passes a paymentMethod (legacy or template), it
+			// must not appear on the wire: the server's strict zod rejects it.
+			const { ctx, captured } = buildMockContext({
+				params: {
+					resource: 'invoice',
+					operation: 'markPaid',
+					invoiceId: 'inv_pm',
+					markPaidAdditional: {
+						paidDate: '2026-08-15',
+						paymentMethod: 'bank_transfer', // <- phantom field on the legacy endpoint
+					},
+				},
+				responseFor: (req) => {
+					if (req.method === 'GET') {
+						return { data: { id: 'inv_pm', status: 'sent' } };
+					}
+					return { data: { success: true, status: 'paid', paidAt: '2026-08-15' } };
+				},
+			});
+
+			await new Frihet().execute.call(ctx);
+
+			const post = captured.find((c) => c.method === 'POST');
+			expect(post).toBeDefined();
+			expect(post!.body).toEqual({ paidDate: '2026-08-15' });
 		});
 
 		it('POST /v1/invoices/:id/paid omits body when no paidDate given', async () => {
@@ -45,28 +107,30 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 				params: {
 					resource: 'invoice',
 					operation: 'markPaid',
-					invoiceId: 'inv_456',
+					invoiceId: 'inv_no_date',
 					markPaidAdditional: {},
 				},
-				responseFor: () => ({
-					data: { success: true, status: 'paid', paidAt: '2026-08-20' },
-				}),
+				responseFor: (req) => {
+					if (req.method === 'GET') {
+						return { data: { id: 'inv_no_date', status: 'sent' } };
+					}
+					return { data: { success: true, status: 'paid', paidAt: '2026-08-20' } };
+				},
 			});
 
 			await new Frihet().execute.call(ctx);
 
-			const req = lastRequest(captured);
-			expect(req.method).toBe('POST');
-			expect(req.uri).toBe('https://api.frihet.io/v1/invoices/inv_456/paid');
-			// No body sent (omit empty body to match the helper's request contract)
-			expect(req.body).toBeUndefined();
+			const post = captured.find((c) => c.method === 'POST');
+			expect(post).toBeDefined();
+			expect(post!.body).toBeUndefined();
 		});
 	});
 
 	describe('invoice.send', () => {
-		it('POST /v1/invoices/:id/send uses recipientEmail (not email)', async () => {
-			// ERP contract (publicApi.ts:5690-5695): sendSchema is strict zod
-			// requiring recipientEmail. Unknown keys (incl. "email") return 400.
+		it('POST /v1/invoices/:id/send sends recipientEmail only', async () => {
+			// sendSchema (publicApi.ts:5690-5695) is strict zod with
+			// recipientEmail REQUIRED. The previous wire field `email` was
+			// rejected. The field is now required in the n8n UI.
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'invoice',
@@ -82,11 +146,10 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 			const req = lastRequest(captured);
 			expect(req.method).toBe('POST');
 			expect(req.uri).toBe('https://api.frihet.io/v1/invoices/inv_789/send');
-			// Server expects recipientEmail, not email
 			expect(req.body).toEqual({ recipientEmail: '[email protected]' });
 		});
 
-		it('POST /v1/quotes/:id/send uses recipientEmail (not email)', async () => {
+		it('POST /v1/quotes/:id/send sends recipientEmail only', async () => {
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'quote',
@@ -104,9 +167,10 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 			expect(req.body).toEqual({ recipientEmail: '[email protected]' });
 		});
 
-		it('POST /v1/invoices/:id/send can omit body when no recipient override', async () => {
-			// Server defaults to client's email, so the node should NOT send
-			// an empty body. Currently the node sends { email: '' } — server rejects.
+		it('THROWS a clear error when recipientEmail is empty (no phantom default fallback)', async () => {
+			// B3: the previous description lied — "uses client email by default"
+			// was a phantom assumption. The server has no default. We surface
+			// a clear NodeOperationError instead of letting the wire 400.
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'invoice',
@@ -117,34 +181,38 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 				responseFor: () => ({ data: { success: true, messageId: 'msg_ne' } }),
 			});
 
-			await new Frihet().execute.call(ctx);
+			await expect(new Frihet().execute.call(ctx)).rejects.toThrow(/recipientEmail is required/);
+			// No request hits the wire.
+			expect(captured.length).toBe(0);
+		});
 
+		it('TRIMS whitespace before sending recipientEmail', async () => {
+			const { ctx, captured } = buildMockContext({
+				params: {
+					resource: 'invoice',
+					operation: 'send',
+					invoiceId: 'inv_ws',
+					sendEmail: '  [email protected]  ',
+				},
+				responseFor: () => ({ data: { success: true, messageId: 'msg_ws' } }),
+			});
+
+			await new Frihet().execute.call(ctx);
 			const req = lastRequest(captured);
-			// recipientEmail is required by server; if we don't have one, the
-			// node should NOT send a request with an empty value (server will 400).
-			// Per the contract: sendSchema has recipientEmail REQUIRED, so the
-			// node must either send a populated value or surface an error here.
-			// For now: the node omits the body — caller must always supply
-			// recipientEmail or the server rejects.
-			expect(req.body).toBeUndefined();
+			expect(req.body).toEqual({ recipientEmail: '[email protected]' });
 		});
 	});
 
 	describe('invoice.list + pagination', () => {
 		it('GET /v1/invoices uses cursor param (not after) and reads nextCursor at root', async () => {
-			// ERP contract (publicApi.ts:7642-7705): cursor is base64url-encoded
-			// JSON {__id: <docId>}. Response: { data, total, limit, offset, nextCursor }.
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'invoice',
 					operation: 'list',
 					returnAll: false,
 					limit: 50,
-					after: '', // user did not supply a cursor
-					filters: {
-						status: 'overdue',
-						q: 'Foo',
-					},
+					after: '',
+					filters: { status: 'overdue', q: 'Foo' },
 				},
 				responseFor: () => ({
 					data: [{ id: 'inv_1', documentNumber: 'F2026-0001', total: 100 }],
@@ -160,21 +228,48 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 			const req = lastRequest(captured);
 			expect(req.method).toBe('GET');
 			expect(req.uri).toBe('https://api.frihet.io/v1/invoices');
-			// Query string uses limit + the server-supported filters
 			expect(req.qs).toMatchObject({
 				limit: 50,
 				status: 'overdue',
 				q: 'Foo',
 			});
-			// The node must NOT send `after` — that name is not in the server spec.
+			expect(req.qs).not.toHaveProperty('after');
+		});
+
+		it('FORWARDS a real cursor value as the cursor query param (not after)', async () => {
+			// Real mutation proof: the user passes a base64url cursor from a
+			// previous response, and the node forwards it as `cursor` (not
+			// `after`). This is the canonical cursor walk.
+			const realCursor = 'eyJfX2lkIjoiaW52XzEifQ';
+			const { ctx, captured } = buildMockContext({
+				params: {
+					resource: 'invoice',
+					operation: 'list',
+					returnAll: false,
+					limit: 25,
+					after: realCursor,
+					filters: {},
+				},
+				responseFor: () => ({
+					data: [{ id: 'inv_2', documentNumber: 'F2026-0002' }],
+					total: 1,
+					limit: 25,
+					offset: 1,
+				}),
+			});
+
+			await new Frihet().execute.call(ctx);
+
+			const req = lastRequest(captured);
+			expect(req.qs).toMatchObject({
+				limit: 25,
+				cursor: realCursor,
+			});
+			// The legacy `after` query param is NOT in the server spec.
 			expect(req.qs).not.toHaveProperty('after');
 		});
 
 		it('GET /v1/clients paginates with cursor/limit (when returnAll=true)', async () => {
-			// We feed two server pages and assert the node re-issues a second
-			// request with the cursor from the first response. The node uses
-			// limit=100 (the server's max) when returnAll=true and pages
-			// until `nextCursor` is absent.
 			let page = 0;
 			const { ctx, captured } = buildMockContext({
 				params: {
@@ -185,10 +280,9 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 					after: '',
 					filters: { stage: 'active' },
 				},
-				responseFor: (req) => {
+				responseFor: () => {
 					page += 1;
 					if (page === 1) {
-						// Full page → cursor present
 						return {
 							data: [{ id: 'c_1', name: 'Acme' }],
 							total: 2,
@@ -197,45 +291,88 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 							nextCursor: 'eyJfX2lkIjoiY18xIn0',
 						};
 					}
-					// Last page (empty) → no cursor
-					return {
-						data: [],
-						total: 1,
-						limit: 100,
-						offset: 1,
-					};
+					return { data: [], total: 1, limit: 100, offset: 1 };
 				},
 			});
 
 			await new Frihet().execute.call(ctx);
 
-			// Two GETs in total
 			expect(captured.length).toBe(2);
-			// First page: no cursor, page-size 100 (server max)
-			expect(captured[0].qs).toMatchObject({
-				limit: 100,
-				stage: 'active',
-			});
+			expect(captured[0].qs).toMatchObject({ limit: 100, stage: 'active' });
 			expect(captured[0].qs).not.toHaveProperty('cursor');
-			// Second page: cursor set from previous response — server returns
-			// `nextCursor` at the response root, so the node must read it there.
 			expect(captured[1].qs).toMatchObject({
 				limit: 100,
 				stage: 'active',
 				cursor: 'eyJfX2lkIjoiY18xIn0',
 			});
 		});
+
+		it('SURFACES truncated:true from the q/search path as a synthetic truncated item', async () => {
+			// B7: publicApi.ts:7574, :7596 — q/search saturates at 500 docs
+			// and returns truncated:true without nextCursor. The previous
+			// implementation terminated the loop and silently claimed
+			// completeness. The R2 fix appends a `{_truncated:true}` item
+			// so the workflow author can detect.
+			const { ctx, captured } = buildMockContext({
+				params: {
+					resource: 'client',
+					operation: 'list',
+					returnAll: true,
+					limit: 100,
+					after: '',
+					filters: { q: 'saturate' },
+				},
+				responseFor: () => ({
+					data: [{ id: 'c_1', name: 'Acme' }],
+					total: 500,
+					limit: 100,
+					offset: 0,
+					truncated: true, // server saturated at 500 docs
+					// NO nextCursor — server says "more exists but I can't page it"
+				}),
+			});
+
+			const result = await new Frihet().execute.call(ctx);
+			const items = result[0].map((item) => item.json);
+			const truncated = items.find((it: any) => it._truncated === true) as any;
+			expect(truncated).toBeDefined();
+			expect(truncated?.reason).toMatch(/saturated/);
+			// Only ONE request issued — the loop terminates on truncated:true.
+			expect(captured.length).toBe(1);
+		});
+
+		it('surfaces truncated:true on a single-page response with items', async () => {
+			const { ctx, captured } = buildMockContext({
+				params: {
+					resource: 'invoice',
+					operation: 'list',
+					returnAll: false,
+					limit: 50,
+					after: '',
+					filters: {},
+				},
+				responseFor: () => ({
+					data: [{ id: 'inv_1', documentNumber: 'F2026-0001' }],
+					total: 500,
+					limit: 50,
+					offset: 0,
+					truncated: true,
+				}),
+			});
+
+			const result = await new Frihet().execute.call(ctx);
+			const items = result[0].map((item) => item.json);
+			const truncated = items.find((it: any) => it._truncated === true);
+			expect(truncated).toBeDefined();
+		});
 	});
 
 	describe('invoice.create — strict schema', () => {
 		it('POST /v1/invoices sends only fields from the ERP create schema', async () => {
 			// ERP contract (publicApi.ts:737-778): strict zod accepts ONLY
-			// clientName, clientId, clientAddress, clientTaxId, documentNumber,
-			// items, issueDate, dueDate, status, notes, taxRate, irpfRate,
-			// equivalenceSurchargeRate, clientLocation, prepayment, seriesId,
-			// discountRate, poNumber, operationType, recurring. Plus the implicit
-			// snapshot fields clientEmail, clientTaxId, clientAddress, clientLocation.
-			// Anything else (e.g. `--VCARD--currency`, `--VCARD--clientEmail`) is rejected.
+			// the listed fields. `clientEmail` and `currency` are NOT in the
+			// schema (clientEmail is server-resolved from the client doc;
+			// the server defaults currency to 'EUR').
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'invoice',
@@ -245,8 +382,8 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 					invoiceAdditional: {
 						clientId: 'c_1',
 						taxRate: 21,
-						currency: 'EUR', // <- phantom field — must be stripped
-						clientEmail: '[email protected]', // <- snapshot from client doc — must be stripped here
+						currency: 'EUR', // <- phantom
+						clientEmail: '[email protected]', // <- phantom
 						notes: 'Stripe pi_123',
 					},
 				},
@@ -260,12 +397,6 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 			const req = lastRequest(captured);
 			expect(req.method).toBe('POST');
 			expect(req.uri).toBe('https://api.frihet.io/v1/invoices');
-			// Body must contain only the schema-allowed keys.
-			// Server schema (publicApi.ts:737-778) is strict zod and rejects
-			// unknown keys. `clientEmail` and `currency` are NOT in the schema
-			// (clientEmail is server-resolved from the client doc; the server
-			// defaults currency to 'EUR' on its own — never accepts it from
-			// the create body).
 			const allowedKeys = new Set([
 				'clientName',
 				'clientId',
@@ -309,9 +440,6 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 
 			const req = lastRequest(captured);
 			expect(req.uri).toBe('https://api.frihet.io/v1/clients/c_test');
-			// apiKeyAuth extracts both X-API-Key and Bearer.
-			// The Authorized header is acceptable because the server also accepts
-			// Authorization: Bearer <fri_...> (see apiKeyAuth.ts:14-19).
 			expect(req.headers.Authorization).toMatch(/^Bearer fri_/);
 			expect(req.headers['Content-Type']).toBe('application/json');
 		});
@@ -349,7 +477,6 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 					operation: 'get',
 					clientId: 'missing',
 				},
-				// Server returns 404 with { error: 'Client not found', meta: { requestId } }
 				responseFor: () => {
 					const err: any = new Error('Request failed');
 					err.statusCode = 404;
@@ -359,8 +486,47 @@ describe('Frihet node — contract vs Frihet ERP publicApi f901d4292', () => {
 			});
 
 			await expect(new Frihet().execute.call(ctx)).rejects.toThrow(/Client not found/);
-			// Sanity: the request was issued
 			expect(captured.length).toBe(1);
+		});
+	});
+
+	describe('description.parameters — UI surface vs server contract', () => {
+		// The n8n node surfaces the operations via INodeTypeDescription.properties.
+		// Any UI option that maps to a non-existent server field is a
+		// "phantom" — the workflow author can configure it but the wire
+		// either 400s or silently drops it. The contracts between the
+		// node UI and the server strict-zod schemas are pinned here.
+		it('lists operations matching the 6-resources/33-ops inventory', () => {
+			const node = new Frihet();
+			const props = node.description.properties;
+			const resourceProp = props.find((p) => p.name === 'resource') as any;
+			const resources = resourceProp.options.map((o: any) => o.value);
+			expect(resources.sort()).toEqual(['client', 'expense', 'invoice', 'product', 'quote', 'vendor']);
+		});
+
+		it('invoice.send parameter is required (recipientEmail is REQUIRED server-side)', () => {
+			const node = new Frihet();
+			const props = node.description.properties;
+			const sendEmail = props.find((p) => p.name === 'sendEmail') as any;
+			expect(sendEmail).toBeDefined();
+			expect(sendEmail.required).toBe(true);
+			// The field is bounded to invoice/quote send operations only.
+			const show = sendEmail.displayOptions.show;
+			expect(show.resource).toEqual(['invoice', 'quote']);
+			expect(show.operation).toEqual(['send']);
+		});
+
+		it('markPaidAdditional collection does NOT expose paymentMethod (no backend authority)', () => {
+			// The R1 description previously allowed a `paymentMethod` selector
+			// with values {bank_transfer, cash, card, stripe, paypal, other}.
+			// The server's strict zod rejects any unknown key — there is no
+			// payment-method field on /paid. The selector is removed.
+			const node = new Frihet();
+			const props = node.description.properties;
+			const markPaid = props.find((p) => p.name === 'markPaidAdditional') as any;
+			expect(markPaid).toBeDefined();
+			const optionNames = (markPaid.options as any[]).map((o) => o.name);
+			expect(optionNames).not.toContain('Payment Method');
 		});
 	});
 });

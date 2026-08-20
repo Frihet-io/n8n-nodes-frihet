@@ -1,6 +1,12 @@
 # Frihet ERP — n8n Workflow Templates
 
-Ready-to-import n8n workflow templates for [Frihet ERP](https://frihet.io). All templates use the `n8n-nodes-frihet` community node.
+Ready-to-import n8n workflow templates for [Frihet ERP](https://frihet.io). All
+templates use the `n8n-nodes-frihet` community node.
+
+> **Two webhook-receiver templates are quarantined.** See
+> [`unverified-webhooks/`](./unverified-webhooks/) for the disposition.
+> The remaining 6 templates in this folder are the safe, ready-to-use
+> set.
 
 ## Prerequisites
 

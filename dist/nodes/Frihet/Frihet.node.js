@@ -505,10 +505,17 @@ class Frihet {
                 // =====================================================================
                 // INVOICE SEND — additional params
                 // =====================================================================
+                // The ERP sendSchema (publicApi.ts:5690-5695) is strict zod with
+                // `recipientEmail` REQUIRED. There is NO server-side fallback to
+                // the client's email (the R1 description lied — defaulting to
+                // client email was a phantom assumption). We require the field
+                // explicitly so the editor surfaces the gap before the run, and
+                // so the wire body is always valid.
                 {
-                    displayName: 'Email',
+                    displayName: 'Recipient Email',
                     name: 'sendEmail',
                     type: 'string',
+                    required: true,
                     default: '',
                     displayOptions: {
                         show: {
@@ -516,7 +523,19 @@ class Frihet {
                             operation: ['send'],
                         },
                     },
-                    description: 'Override recipient email (uses client email by default)',
+                    placeholder: '[email protected]',
+                    description: 'Recipient email. Required by the ERP sendSchema (publicApi.ts:5690-5695). There is no server-side default to the client email — the field must be supplied or the server returns 400.',
+                    typeOptions: {
+                        validation: [
+                            {
+                                type: 'regex',
+                                properties: {
+                                    regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+                                    errorMessage: 'Must be a valid email address',
+                                },
+                            },
+                        ],
+                    },
                 },
                 // =====================================================================
                 // MARK PAID — additional params
@@ -1442,6 +1461,12 @@ class Frihet {
                 // `nextCursor` is base64url-encoded JSON `{__id: <docId>}` and lives
                 // at the response root, NOT under `meta`. Passing the cursor back
                 // in the next call's `?cursor=<base64url>` query advances the page.
+                //
+                // TRUNCATION: the `q`/`search` path and the offset-fallback scan
+                // saturate at 500 docs (publicApi.ts:7574, :7596). The server
+                // emits `truncated: true` in that case even though nextCursor is
+                // absent. We surface the flag on the final item so the workflow
+                // author can detect (and remediate) an incomplete pagination.
                 // ===================================================================
                 else if (operation === 'list') {
                     const returnAll = this.getNodeParameter('returnAll', i);
@@ -1463,14 +1488,30 @@ class Frihet {
                         // Paginate through all pages
                         let allItems = [];
                         let cursor;
+                        let truncated = false;
                         do {
                             const pageQs = { ...qs, limit: 100, ...(cursor ? { cursor } : {}) };
                             const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
                             const pageItems = response?.data ?? [];
                             allItems = allItems.concat(pageItems);
                             cursor = response?.nextCursor;
+                            if (response?.truncated === true)
+                                truncated = true;
+                            // Belt-and-braces: if the server reports truncated but
+                            // also no nextCursor, terminate the loop. If nextCursor
+                            // IS present alongside truncated, the next page might
+                            // still be honored by the server but the docs say it
+                            // can repeat/skip — stop here loudly.
+                            if (truncated)
+                                break;
                         } while (cursor);
                         returnData.push(...allItems);
+                        if (truncated) {
+                            returnData.push({
+                                _truncated: true,
+                                reason: 'Backend returned truncated:true. The q/search path or offset-fallback scan saturated at 500 docs (publicApi.ts:7574, :7596). Pagination is incomplete — narrow the filter or page more explicitly.',
+                            });
+                        }
                     }
                     else {
                         const limit = this.getNodeParameter('limit', i);
@@ -1480,16 +1521,21 @@ class Frihet {
                             pageQs.cursor = cursor;
                         const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
                         const pageItems = response?.data ?? [];
-                        // Surface a single wrapper with the next cursor so workflows
-                        // can walk the cursor across iterations.
                         if (pageItems.length > 0) {
                             returnData.push(...pageItems);
+                            if (response?.truncated === true) {
+                                returnData.push({
+                                    _truncated: true,
+                                    reason: 'Backend returned truncated:true on this page. Pagination is incomplete.',
+                                });
+                            }
                         }
                         else {
                             returnData.push({
                                 items: [],
                                 nextCursor: response?.nextCursor ?? null,
                                 total: response?.total ?? 0,
+                                truncated: response?.truncated === true,
                             });
                         }
                     }
@@ -1678,9 +1724,14 @@ class Frihet {
                     const idParam = `${resource}Id`;
                     const id = this.getNodeParameter(idParam, i);
                     const emailOverride = this.getNodeParameter('sendEmail', i, '');
-                    const body = {};
-                    if (emailOverride)
-                        body.recipientEmail = emailOverride;
+                    // sendSchema requires recipientEmail (publicApi.ts:5690-5695).
+                    // The UI marks the field as required, but defensive check:
+                    // surface a clear error to the workflow author instead of
+                    // letting the server 400 on empty body.
+                    if (!emailOverride || !emailOverride.trim()) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), 'recipientEmail is required by the ERP sendSchema (publicApi.ts:5690-5695). Set the “Recipient Email” parameter on the node.', { itemIndex: i });
+                    }
+                    const body = { recipientEmail: emailOverride.trim() };
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', `/${endpoint}/${id}/send`, body);
                     returnData.push(response?.data ?? response ?? { id, sent: true });
                 }
@@ -1691,9 +1742,25 @@ class Frihet {
                 // (publicApi.ts:5832-5834). No `paymentMethod` field — payment-
                 // method tracking lives on the legacy `payments[]` ledger,
                 // Stripe Connect `paymentDetails`, or Payment Authority V1.
+                //
+                // PAYMENT AUTHORITY V1 (B1/B2 hard fail): the V1 ledger is
+                // forward-only and runs as a Firebase Callable, not REST.
+                // The legacy `/paid` endpoint does NOT check the V1 cut marker
+                // (publicApi.ts:5827-5859 does not reference paymentAuthorityVersion)
+                // — so calling it on a V1 invoice silently creates an
+                // AUTHORITY_MISSING / PROJECTION_DRIFT divergence (see
+                // paymentAuthorityV1.ts:501-502, :881, :1346). We pre-fetch
+                // the invoice and fail closed on V1.
                 else if (operation === 'markPaid') {
                     const id = this.getNodeParameter('invoiceId', i);
                     const markPaidAdditional = this.getNodeParameter('markPaidAdditional', i, {});
+                    // Pre-fetch the invoice to detect Payment Authority V1.
+                    const invoiceRead = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/invoices/${id}`);
+                    const invoiceDoc = (invoiceRead?.data ?? invoiceRead);
+                    const v1 = invoiceDoc?.paymentAuthorityVersion;
+                    if (v1 === 1) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), `Invoice ${id} has paymentAuthorityVersion=1 (Payment Authority V1 cut marker). The legacy REST /paid endpoint does NOT update V1's forward-only ledger and will create AUTHORITY_MISSING / PROJECTION_DRIFT divergence. Use the Payment Authority V1 callable (postInvoicePaymentV1) directly, or use the @frihet/mcp-server Payment Authority tool. The legacy markPaid action is BLOCKED for V1 invoices.`, { itemIndex: i });
+                    }
                     const body = {};
                     if (markPaidAdditional.paidDate)
                         body.paidDate = markPaidAdditional.paidDate;
