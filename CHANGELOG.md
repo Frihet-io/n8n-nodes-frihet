@@ -24,7 +24,7 @@ protected release workflow succeeds and its immutable readback passes.
 - Added adversarial tests for stale version, wrong repo/ref/SHA, dirty tree,
   existing npm version, tracked dependencies, source/`dist` drift, and unsafe
   self-approval, webhook-template claims, and other bypasses. The release
-  candidate runs 81/81 tests.
+  candidate runs 82/82 tests.
 - Removed the quarantined webhook templates from the production catalogue.
   They remain test fixtures only and make no HMAC/security promise.
 - Reverified MCP capability truth against `Frihet-io/frihet-mcp` main

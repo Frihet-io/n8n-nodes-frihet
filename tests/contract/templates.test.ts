@@ -176,6 +176,21 @@ describe('templates/ — contract sanity', () => {
 		expect(catalogue).not.toContain('for webhook secret verification');
 	});
 
+	it('rejects a production-catalogue mutant that promotes an unverified webhook', () => {
+		const catalogue = fs.readFileSync(path.join(TEMPLATES_DIR, 'README.md'), 'utf8');
+		const assertSafe = (source: string) => {
+			if (/^### \d+\. `(?:new-client-to-hubspot|quote-accepted-to-invoice)\.json`/m.test(source)) {
+				throw new Error('quarantined webhook promoted into production catalogue');
+			}
+			if (source.includes('for webhook secret verification')) {
+				throw new Error('catalogue promises signature verification that is not implemented');
+			}
+		};
+		expect(() => assertSafe(catalogue)).not.toThrow();
+		const unsafeMutant = `${catalogue}\n### 7. \`new-client-to-hubspot.json\`\nCredentials needed: Frihet API (for webhook secret verification)\n`;
+		expect(() => assertSafe(unsafeMutant)).toThrow();
+	});
+
 	it('states that quarantined webhooks have no production-safe setup', () => {
 		const quarantine = fs.readFileSync(
 			path.join(TEMPLATES_DIR, 'unverified-webhooks/README.md'),

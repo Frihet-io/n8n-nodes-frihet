@@ -25,7 +25,7 @@ sandboxed evaluator against the actual Frihet webhook payload.
 | Operations | 33 |
 | Workflow templates (ready-to-use) | 6 (was 8; **2 quarantined** — see §6) |
 | Workflow templates (unverified-webhooks/) | 2 (see §6 for the why) |
-| Contract tests | **81** (66 contract tests from R3 + 15 release/template-policy assertions) |
+| Contract tests | **82** (66 contract tests from R3 + 16 release/template-policy assertions) |
 | Defects reproduced | 5 (R1) + **5 more (R2)** |
 | Defects fixed in this PR | 5 (R1) + 5 (R2) |
 | Coverage of the public REST surface | **~20 %** |
@@ -408,7 +408,7 @@ This is a real gap for fiscal writes. Adding propagation is Wave 2.
 $ npm run build && npm test
 …
 Test Suites: 4 passed, 4 total
-Tests:       81 passed, 81 total
+Tests:       82 passed, 82 total
 ```
 
 - `tests/contract/invoice.test.ts` — 18 tests: `markPaid`
@@ -416,8 +416,9 @@ Tests:       81 passed, 81 total
   required + trim + clear error), list pagination (cursor + real
   cursor + truncated surfacing), invoice create schema, URL/auth
   header, error envelope, UI surface assertions.
-- `tests/contract/templates.test.ts` — 43 assertions (6 templates ×
-  sanity checks plus two quarantine-policy guards). The 2 quarantined
+- `tests/contract/templates.test.ts` — 44 assertions (6 templates ×
+  sanity checks plus three quarantine-policy guards, including an unsafe
+  promotion mutant). The 2 quarantined
   templates are NOT included in the ready-to-use invariants.
 - `tests/contract/webhook-expressions.test.ts` — 7 tests that
   actually RUN the templates' literal `{{ ... }}` and `={{ ... }}`
@@ -489,7 +490,7 @@ templates/README.md                                    — updated
 tests/_helpers/n8n-mock.ts                             — IExecuteFunctions harness
 tests/_helpers/n8n-expression.ts                       — n8n expression evaluator (R2)
 tests/contract/invoice.test.ts                         — 18 tests (was 11 in R1)
-tests/contract/templates.test.ts                       — 43 assertions
+tests/contract/templates.test.ts                       — 44 assertions
 tests/contract/webhook-expressions.test.ts              — 7 tests (R2 NEW)
 tests/contract/release.test.ts                         — 13 release/package assertions
 jest.config.js                                         — minimal ts-jest
