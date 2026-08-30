@@ -25,7 +25,7 @@ sandboxed evaluator against the actual Frihet webhook payload.
 | Operations | 33 |
 | Workflow templates (ready-to-use) | 6 (was 8; **2 quarantined** — see §6) |
 | Workflow templates (unverified-webhooks/) | 2 (see §6 for the why) |
-| Contract tests | **119** (66 contract tests from R3 + 53 release/template-policy assertions) |
+| Contract tests | **128** (66 contract tests from R3 + 62 release/template-policy assertions) |
 | Defects reproduced | 5 (R1) + **5 more (R2)** |
 | Defects fixed in this PR | 5 (R1) + 5 (R2) |
 | Coverage of the public REST surface | **~20 %** |
@@ -408,7 +408,7 @@ This is a real gap for fiscal writes. Adding propagation is Wave 2.
 $ npm run build && npm test
 …
 Test Suites: 4 passed, 4 total
-Tests:       119 passed, 119 total
+Tests:       128 passed, 128 total
 ```
 
 - `tests/contract/invoice.test.ts` — 18 tests: `markPaid`

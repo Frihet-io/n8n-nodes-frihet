@@ -341,7 +341,7 @@ async function registryResponseJson(response, label) {
 	try {
 		return JSON.parse(body);
 	} catch (error) {
-		throw new Error(`${label} returned invalid JSON: ${error.message}`);
+		throw new RegistryTransientError(`${label} returned incomplete or invalid JSON: ${error.message}`, error);
 	}
 }
 
@@ -546,36 +546,67 @@ async function reconcileGitHubRelease() {
 	return ensureRelease(process.env.GITHUB_SHA);
 }
 
-async function main() {
-	const [command, ...args] = process.argv.slice(2);
+const HANDLER_COMPLETION = Symbol('release-control-handler-completion');
+
+const DEFAULT_COMMAND_HANDLERS = Object.freeze({
+	verifyDispatch: assertDispatch,
+	verifyEnvironment,
+	verifyMetadata: assertMetadata,
+	packEvidence: createPackEvidence,
+	registryDecision,
+	reconcileRegistry,
+	reconcileGitHubRelease,
+	dispatchSelftest: () => undefined,
+	selftest: () => undefined,
+});
+
+async function dispatchCommand(command, args = [], handlers = DEFAULT_COMMAND_HANDLERS) {
 	switch (command) {
 		case 'verify-dispatch':
-			assertDispatch();
+			await handlers.verifyDispatch();
 			break;
 		case 'verify-environment':
-			await verifyEnvironment();
+			await handlers.verifyEnvironment();
 			break;
 		case 'verify-metadata':
-			assertMetadata();
+			await handlers.verifyMetadata();
 			break;
 		case 'pack-evidence':
-			createPackEvidence();
+			await handlers.packEvidence();
 			break;
 		case 'registry-decision':
-			await registryDecision();
+			await handlers.registryDecision();
 			break;
 		case 'reconcile-registry':
-			await reconcileRegistry(args.includes('--retry'));
+			await handlers.reconcileRegistry(args.includes('--retry'));
 			break;
 		case 'reconcile-github-release':
-			await reconcileGitHubRelease();
+			await handlers.reconcileGitHubRelease();
+			break;
+		case 'dispatch-selftest':
+			await handlers.dispatchSelftest();
 			break;
 		case 'selftest':
+			await handlers.selftest();
 			break;
 		default:
 			throw new Error(`Unknown release-control command: ${command ?? '<missing>'}`);
 	}
-	return command;
+	return { command, completion: HANDLER_COMPLETION };
+}
+
+function hasCompletedHandler(result, command) {
+	return Boolean(
+		result &&
+		typeof result === 'object' &&
+		result.command === command &&
+		result.completion === HANDLER_COMPLETION,
+	);
+}
+
+async function main() {
+	const [command, ...args] = process.argv.slice(2);
+	return dispatchCommand(command, args);
 }
 
 function cliSuccessMarker(command) {
@@ -595,7 +626,9 @@ module.exports = {
 	buildPackEvidence,
 	cliSuccessMarker,
 	decideRegistryAction,
+	dispatchCommand,
 	fetchPublishedPackage,
+	hasCompletedHandler,
 	isTransientRegistryStatus,
 	parseTarFiles,
 	reconcileRegistryReadback,
@@ -611,7 +644,10 @@ module.exports = {
 
 if (require.main === module) {
 	main()
-		.then((command) => console.log(cliSuccessMarker(command)))
+		.then((result) => {
+			invariant(hasCompletedHandler(result, result?.command), 'Release-control command handler did not complete');
+			console.log(cliSuccessMarker(result.command));
+		})
 		.catch((error) => {
 			console.error(error);
 			process.exit(1);

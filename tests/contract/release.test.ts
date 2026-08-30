@@ -49,6 +49,16 @@ const EXPECTED_RUNS: Record<string, string> = {
 	'Reconcile immutable Git tag and GitHub Release': "node .github/scripts/release-control.cjs reconcile-github-release | grep -Fx 'release-control:reconcile-github-release:ok'",
 };
 
+const WORKFLOW_COMMAND_HANDLERS = [
+	['verify-dispatch', 'verifyDispatch', [], []],
+	['verify-environment', 'verifyEnvironment', [], []],
+	['verify-metadata', 'verifyMetadata', [], []],
+	['pack-evidence', 'packEvidence', [], []],
+	['registry-decision', 'registryDecision', [], []],
+	['reconcile-registry', 'reconcileRegistry', ['--retry'], [true]],
+	['reconcile-github-release', 'reconcileGitHubRelease', [], []],
+] as const;
+
 function fakeResponse(status: number, body: JsonObject | Buffer): JsonObject {
 	const bytes = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
 	return {
@@ -215,7 +225,53 @@ describe('npm release control plane', () => {
 		const defanged = spawnSync(process.execPath, [mutantPath, 'selftest'], { encoding: 'utf8' });
 		expect(defanged.status).toBe(0);
 		expect(defanged.stdout.trim()).not.toBe('release-control:selftest:ok');
+
+		const dispatchLive = spawnSync(
+			process.execPath,
+			[path.join(ROOT, '.github/scripts/release-control.cjs'), 'dispatch-selftest'],
+			{ cwd: ROOT, encoding: 'utf8' },
+		);
+		expect(dispatchLive.status).toBe(0);
+		expect(dispatchLive.stdout.trim()).toBe('release-control:dispatch-selftest:ok');
+
+		const dispatchMutantSource = script.replace(
+			'const [command, ...args] = process.argv.slice(2);',
+			"const [command, ...args] = process.argv.slice(2);\n\tif (command !== 'selftest') return command;",
+		);
+		expect(dispatchMutantSource).not.toBe(script);
+		const dispatchMutantPath = path.join(npmCache, 'release-control-dispatch-defanged.cjs');
+		fs.writeFileSync(dispatchMutantPath, dispatchMutantSource);
+		const dispatchDefanged = spawnSync(process.execPath, [dispatchMutantPath, 'dispatch-selftest'], {
+			cwd: ROOT,
+			encoding: 'utf8',
+		});
+		expect(dispatchDefanged.status).toBe(1);
+		expect(dispatchDefanged.stdout.trim()).not.toBe('release-control:dispatch-selftest:ok');
 	});
+
+	it.each(WORKFLOW_COMMAND_HANDLERS)(
+		'executes the unique %s handler before emitting success',
+		async (command, expectedHandler, args, expectedArgs) => {
+			const handlers = {
+				verifyDispatch: jest.fn(),
+				verifyEnvironment: jest.fn(),
+				verifyMetadata: jest.fn(),
+				packEvidence: jest.fn(),
+				registryDecision: jest.fn(),
+				reconcileRegistry: jest.fn(),
+				reconcileGitHubRelease: jest.fn(),
+				dispatchSelftest: jest.fn(),
+				selftest: jest.fn(),
+			};
+			const result = await control.dispatchCommand(command, [...args], handlers);
+			expect(handlers[expectedHandler]).toHaveBeenCalledTimes(1);
+			expect(handlers[expectedHandler]).toHaveBeenCalledWith(...expectedArgs);
+			for (const [handlerName, handler] of Object.entries(handlers)) {
+				if (handlerName !== expectedHandler) expect(handler).not.toHaveBeenCalled();
+			}
+			expect(control.hasCompletedHandler(result, command)).toBe(true);
+		},
+	);
 
 	it('rejects a defanged publish step even when dead text contains the real command', () => {
 		const mutant = clone(workflow);
@@ -360,6 +416,27 @@ describe('npm release control plane', () => {
 		expect(sleep).toHaveBeenCalledTimes(1);
 	});
 
+	it('retries a truncated HTTP-200 manifest until valid JSON and byte-identical success', async () => {
+		const responses = [
+			fakeResponse(200, Buffer.from('{"name":"n8n-nodes-frihet"')),
+			fakeResponse(200, manifest),
+			fakeResponse(200, tarball),
+		];
+		const requestImpl = jest.fn(async () => responses.shift());
+		const sleep = jest.fn(async () => undefined);
+		const readback = await control.reconcileRegistryReadback({
+			attempts: 2,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep,
+		});
+		expect(readback.validated).toBe(true);
+		expect(requestImpl).toHaveBeenCalledTimes(3);
+		expect(sleep).toHaveBeenCalledTimes(1);
+	});
+
 	it.each([
 		Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
 		Object.assign(new Error('request timed out'), { name: 'TimeoutError' }),
@@ -424,6 +501,21 @@ describe('npm release control plane', () => {
 			sleep,
 		})).rejects.toThrow('after 3 attempts');
 		expect(requestImpl).toHaveBeenCalledTimes(6);
+		expect(sleep).toHaveBeenCalledTimes(2);
+	});
+
+	it('exhausts the bounded retry budget when the HTTP-200 manifest stays truncated', async () => {
+		const requestImpl = jest.fn(async () => fakeResponse(200, Buffer.from('{"dist":')));
+		const sleep = jest.fn(async () => undefined);
+		await expect(control.reconcileRegistryReadback({
+			attempts: 3,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep,
+		})).rejects.toThrow('after 3 attempts');
+		expect(requestImpl).toHaveBeenCalledTimes(3);
 		expect(sleep).toHaveBeenCalledTimes(2);
 	});
 

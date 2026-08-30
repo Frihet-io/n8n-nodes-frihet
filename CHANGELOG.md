@@ -33,7 +33,7 @@ the GitHub Release against one exact `main` commit.
   metadata mismatches immediately. GitHub Release reconciliation validates
   both the peeled tag SHA and `target_commitish`, and every workflow CLI call
   must emit its command-specific liveness marker. The release contract runs
-  119/119 tests.
+  128/128 tests.
 - Removed the quarantined webhook templates from the production catalogue.
   They remain test fixtures only and make no HMAC/security promise.
 - Reverified MCP capability truth against `Frihet-io/frihet-mcp` main
