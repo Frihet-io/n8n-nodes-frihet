@@ -25,7 +25,7 @@ sandboxed evaluator against the actual Frihet webhook payload.
 | Operations | 33 |
 | Workflow templates (ready-to-use) | 6 (was 8; **2 quarantined** — see §6) |
 | Workflow templates (unverified-webhooks/) | 2 (see §6 for the why) |
-| Contract tests | **93** (66 contract tests from R3 + 27 release/template-policy assertions) |
+| Contract tests | **119** (66 contract tests from R3 + 53 release/template-policy assertions) |
 | Defects reproduced | 5 (R1) + **5 more (R2)** |
 | Defects fixed in this PR | 5 (R1) + 5 (R2) |
 | Coverage of the public REST surface | **~20 %** |
@@ -408,7 +408,7 @@ This is a real gap for fiscal writes. Adding propagation is Wave 2.
 $ npm run build && npm test
 …
 Test Suites: 4 passed, 4 total
-Tests:       93 passed, 93 total
+Tests:       119 passed, 119 total
 ```
 
 - `tests/contract/invoice.test.ts` — 18 tests: `markPaid`
@@ -425,10 +425,13 @@ Tests:       93 passed, 93 total
   expressions through a sandboxed evaluator (`vm.runInNewContext`)
   against the real Frihet webhook payload. Reproduces B4 (filter
   broken) and B6 (Liquid `| trim`, markPaid response).
-- `tests/contract/release.test.ts` — 24 tests parse the release YAML
+- `tests/contract/release.test.ts` — 50 tests parse the release YAML
   structurally, execute negative provenance/environment/npm/tag/workflow
   mutants, enforce package/lock parity, reject tracked dependencies, and
-  inspect the exact 10-file npm pack bytes and allowlist.
+  inspect the exact 10-file npm pack bytes and allowlist. The npm mutants
+  include transient HTTP/network recovery, bounded exhaustion, and immediate
+  permanent mismatch; tag/Release mutants cover peeled SHA plus
+  `target_commitish`; CLI liveness rejects a defanged `main` entry point.
 
 Reproducible from clean checkout:
 

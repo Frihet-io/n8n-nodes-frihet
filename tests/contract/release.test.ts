@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -28,9 +28,9 @@ const EXPECTED_STEP_NAMES = [
 ];
 
 const EXPECTED_RUNS: Record<string, string> = {
-	'Verify dispatch provenance': 'node .github/scripts/release-control.cjs verify-dispatch',
-	'Verify protected release environment': 'node .github/scripts/release-control.cjs verify-environment',
-	'Verify exact package metadata': 'node .github/scripts/release-control.cjs verify-metadata',
+	'Verify dispatch provenance': "node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'",
+	'Verify protected release environment': "node .github/scripts/release-control.cjs verify-environment | grep -Fx 'release-control:verify-environment:ok'",
+	'Verify exact package metadata': "node .github/scripts/release-control.cjs verify-metadata | grep -Fx 'release-control:verify-metadata:ok'",
 	'Install from lockfile': 'npm ci --no-audit --no-fund',
 	'Build exact committed artifacts': [
 		'npm run build',
@@ -39,15 +39,25 @@ const EXPECTED_RUNS: Record<string, string> = {
 	].join('\n'),
 	'Run contract and release-policy tests': 'npm run test:ci',
 	'Audit production dependency surface': 'npm audit --omit=dev',
-	'Build expected package evidence': 'node .github/scripts/release-control.cjs pack-evidence',
-	'Reconcile existing npm version or request publish': 'node .github/scripts/release-control.cjs registry-decision',
+	'Build expected package evidence': "node .github/scripts/release-control.cjs pack-evidence | grep -Fx 'release-control:pack-evidence:ok'",
+	'Reconcile existing npm version or request publish': "node .github/scripts/release-control.cjs registry-decision | grep -Fx 'release-control:registry-decision:ok'",
 	'Publish missing npm version with trusted publishing': [
-		'node .github/scripts/release-control.cjs verify-dispatch',
+		"node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'",
 		'npm publish --provenance --access public',
 	].join('\n'),
-	'Reconcile final npm bytes': 'node .github/scripts/release-control.cjs reconcile-registry --retry',
-	'Reconcile immutable Git tag and GitHub Release': 'node .github/scripts/release-control.cjs reconcile-github-release',
+	'Reconcile final npm bytes': "node .github/scripts/release-control.cjs reconcile-registry --retry | grep -Fx 'release-control:reconcile-registry:ok'",
+	'Reconcile immutable Git tag and GitHub Release': "node .github/scripts/release-control.cjs reconcile-github-release | grep -Fx 'release-control:reconcile-github-release:ok'",
 };
+
+function fakeResponse(status: number, body: JsonObject | Buffer): JsonObject {
+	const bytes = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
+	return {
+		status,
+		ok: status >= 200 && status < 300,
+		text: async () => bytes.toString('utf8'),
+		arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+	};
+}
 
 function clone<T>(value: T): T {
 	return JSON.parse(JSON.stringify(value)) as T;
@@ -186,6 +196,27 @@ describe('npm release control plane', () => {
 		expect(() => validateReleaseWorkflow(workflow)).not.toThrow();
 	});
 
+	it('requires a live CLI marker and rejects the exact defanged-main mutant', () => {
+		const script = fs.readFileSync(path.join(ROOT, '.github/scripts/release-control.cjs'), 'utf8');
+		const live = spawnSync(process.execPath, [path.join(ROOT, '.github/scripts/release-control.cjs'), 'selftest'], {
+			cwd: ROOT,
+			encoding: 'utf8',
+		});
+		expect(live.status).toBe(0);
+		expect(live.stdout.trim()).toBe('release-control:selftest:ok');
+
+		const mutantSource = script.replace(
+			'if (require.main === module)',
+			'if (false && require.main === module)',
+		);
+		expect(mutantSource).not.toBe(script);
+		const mutantPath = path.join(npmCache, 'release-control-defanged.cjs');
+		fs.writeFileSync(mutantPath, mutantSource);
+		const defanged = spawnSync(process.execPath, [mutantPath, 'selftest'], { encoding: 'utf8' });
+		expect(defanged.status).toBe(0);
+		expect(defanged.stdout.trim()).not.toBe('release-control:selftest:ok');
+	});
+
 	it('rejects a defanged publish step even when dead text contains the real command', () => {
 		const mutant = clone(workflow);
 		const publish = stepByName(mutant, 'Publish missing npm version with trusted publishing');
@@ -299,6 +330,120 @@ describe('npm release control plane', () => {
 		expect(retry.readback.validated).toBe(true);
 	});
 
+	it.each([404, 408, 425, 429, 500, 502, 599])('classifies npm HTTP %s as transient', (status) => {
+		expect(control.isTransientRegistryStatus(status)).toBe(true);
+	});
+
+	it.each([400, 401, 403, 409, 422])('classifies npm HTTP %s as permanent', (status) => {
+		expect(control.isTransientRegistryStatus(status)).toBe(false);
+	});
+
+	it('retries the exact manifest-200/tarball-404 state until byte-identical success', async () => {
+		const responses = [
+			fakeResponse(200, manifest),
+			fakeResponse(404, { error: 'tarball not propagated' }),
+			fakeResponse(200, manifest),
+			fakeResponse(200, tarball),
+		];
+		const requestImpl = jest.fn(async () => responses.shift());
+		const sleep = jest.fn(async () => undefined);
+		const readback = await control.reconcileRegistryReadback({
+			attempts: 2,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep,
+		});
+		expect(readback.validated).toBe(true);
+		expect(requestImpl).toHaveBeenCalledTimes(4);
+		expect(sleep).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
+		Object.assign(new Error('request timed out'), { name: 'TimeoutError' }),
+	])('retries transient npm network failures before success', async (networkError) => {
+		const requestImpl = jest
+			.fn()
+			.mockRejectedValueOnce(networkError)
+			.mockResolvedValueOnce(fakeResponse(200, manifest))
+			.mockResolvedValueOnce(fakeResponse(200, tarball));
+		const readback = await control.reconcileRegistryReadback({
+			attempts: 2,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep: async () => undefined,
+		});
+		expect(readback.validated).toBe(true);
+	});
+
+	it.each(['manifest body', 'tarball body'])('retries a connection failure while reading the npm %s', async (phase) => {
+		const bodyError = Object.assign(new Error('connection reset while streaming'), { code: 'ECONNRESET' });
+		const brokenManifest = fakeResponse(200, manifest);
+		brokenManifest.text = async () => { throw bodyError; };
+		const brokenTarball = fakeResponse(200, tarball);
+		brokenTarball.arrayBuffer = async () => { throw bodyError; };
+		const responses = phase === 'manifest body'
+			? [brokenManifest, fakeResponse(200, manifest), fakeResponse(200, tarball)]
+			: [fakeResponse(200, manifest), brokenTarball, fakeResponse(200, manifest), fakeResponse(200, tarball)];
+		const requestImpl = jest.fn(async () => responses.shift());
+		const readback = await control.reconcileRegistryReadback({
+			attempts: 2,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep: async () => undefined,
+		});
+		expect(readback.validated).toBe(true);
+	});
+
+	it('exhausts the bounded retry budget when the matching manifest tarball stays 404', async () => {
+		expect(control.REGISTRY_RETRY_ATTEMPTS).toBe(12);
+		expect(control.REGISTRY_RETRY_DELAY_MS).toBe(10_000);
+		expect(control.REGISTRY_REQUEST_TIMEOUT_MS).toBe(10_000);
+		const maximumBudgetMs =
+			control.REGISTRY_RETRY_ATTEMPTS * 2 * control.REGISTRY_REQUEST_TIMEOUT_MS +
+			(control.REGISTRY_RETRY_ATTEMPTS - 1) * control.REGISTRY_RETRY_DELAY_MS;
+		expect(maximumBudgetMs).toBe(350_000);
+		const requestImpl = jest.fn(async (url: string) => (
+			url === evidence.tarballUrl
+				? fakeResponse(404, { error: 'still propagating' })
+				: fakeResponse(200, manifest)
+		));
+		const sleep = jest.fn(async () => undefined);
+		await expect(control.reconcileRegistryReadback({
+			attempts: 3,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep,
+		})).rejects.toThrow('after 3 attempts');
+		expect(requestImpl).toHaveBeenCalledTimes(6);
+		expect(sleep).toHaveBeenCalledTimes(2);
+	});
+
+	it('hard-fails a permanent manifest mismatch without retrying its tarball', async () => {
+		const wrong = clone(manifest);
+		wrong.gitHead = 'f'.repeat(40);
+		const requestImpl = jest.fn(async () => fakeResponse(200, wrong));
+		const sleep = jest.fn(async () => undefined);
+		await expect(control.reconcileRegistryReadback({
+			attempts: 3,
+			delayMs: 0,
+			evidence,
+			expectedSha,
+			fetchPublished: () => control.fetchPublishedPackage(evidence, expectedSha, requestImpl),
+			sleep,
+		})).rejects.toThrow('gitHead mismatch');
+		expect(requestImpl).toHaveBeenCalledTimes(1);
+		expect(sleep).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		['gitHead', (mutant: JsonObject) => { mutant.gitHead = 'f'.repeat(40); }],
 		['integrity', (mutant: JsonObject) => { mutant.dist.integrity = 'sha512-wrong'; }],
@@ -326,6 +471,7 @@ describe('npm release control plane', () => {
 		expect(target).toBe(expectedSha);
 		const release = {
 			tag_name: control.TAG,
+			target_commitish: expectedSha,
 			name: control.RELEASE_NAME,
 			body: control.RELEASE_BODY,
 			draft: false,
@@ -334,6 +480,36 @@ describe('npm release control plane', () => {
 		expect(() => control.validateReleaseRecord(release, target, expectedSha)).not.toThrow();
 		expect(() => control.validateReleaseRecord(release, 'b'.repeat(40), expectedSha)).toThrow('points to');
 	});
+
+	it.each(['develop', 'refs/heads/develop', 'f'.repeat(40)])(
+		'rejects a GitHub Release target_commitish outside exact main semantics: %s',
+		(targetCommitish) => {
+			const release = {
+				tag_name: control.TAG,
+				target_commitish: targetCommitish,
+				name: control.RELEASE_NAME,
+				body: control.RELEASE_BODY,
+				draft: false,
+				prerelease: false,
+			};
+			expect(() => control.validateReleaseRecord(release, expectedSha, expectedSha)).toThrow('target_commitish');
+		},
+	);
+
+	it.each([expectedSha, 'main', 'refs/heads/main'])(
+		'accepts target_commitish %s only with the exact peeled tag SHA',
+		(targetCommitish) => {
+			const release = {
+				tag_name: control.TAG,
+				target_commitish: targetCommitish,
+				name: control.RELEASE_NAME,
+				body: control.RELEASE_BODY,
+				draft: false,
+				prerelease: false,
+			};
+			expect(() => control.validateReleaseRecord(release, expectedSha, expectedSha)).not.toThrow();
+		},
+	);
 
 	it('keeps package and lock metadata on exact version 1.0.2', () => {
 		const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));

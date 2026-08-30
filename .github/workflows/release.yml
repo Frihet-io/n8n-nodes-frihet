@@ -42,17 +42,17 @@ jobs:
       - name: Verify dispatch provenance
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: node .github/scripts/release-control.cjs verify-dispatch
+        run: node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'
 
       - name: Verify protected release environment
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node .github/scripts/release-control.cjs verify-environment
+        run: node .github/scripts/release-control.cjs verify-environment | grep -Fx 'release-control:verify-environment:ok'
 
       - name: Verify exact package metadata
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: node .github/scripts/release-control.cjs verify-metadata
+        run: node .github/scripts/release-control.cjs verify-metadata | grep -Fx 'release-control:verify-metadata:ok'
 
       - name: Install from lockfile
         run: npm ci --no-audit --no-fund
@@ -70,24 +70,24 @@ jobs:
         run: npm audit --omit=dev
 
       - name: Build expected package evidence
-        run: node .github/scripts/release-control.cjs pack-evidence
+        run: node .github/scripts/release-control.cjs pack-evidence | grep -Fx 'release-control:pack-evidence:ok'
 
       - name: Reconcile existing npm version or request publish
         id: registry
-        run: node .github/scripts/release-control.cjs registry-decision
+        run: node .github/scripts/release-control.cjs registry-decision | grep -Fx 'release-control:registry-decision:ok'
 
       - name: Publish missing npm version with trusted publishing
         if: steps.registry.outputs.exists == 'false'
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          node .github/scripts/release-control.cjs verify-dispatch
+          node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'
           npm publish --provenance --access public
 
       - name: Reconcile final npm bytes
-        run: node .github/scripts/release-control.cjs reconcile-registry --retry
+        run: node .github/scripts/release-control.cjs reconcile-registry --retry | grep -Fx 'release-control:reconcile-registry:ok'
 
       - name: Reconcile immutable Git tag and GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node .github/scripts/release-control.cjs reconcile-github-release
+        run: node .github/scripts/release-control.cjs reconcile-github-release | grep -Fx 'release-control:reconcile-github-release:ok'

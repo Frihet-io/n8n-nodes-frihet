@@ -28,7 +28,12 @@ the GitHub Release against one exact `main` commit.
   wrong existing npm metadata/bytes, retry-after-publish, wrong tag target,
   tracked dependencies, source/`dist` drift, weakened workflow structure,
   environment bypasses, unsafe webhook-template claims, and other bypasses.
-  The release contract runs 93/93 tests.
+  Post-publish readback retries bounded transient manifest/tarball
+  `404`/`408`/`425`/`429`/`5xx` and network failures while rejecting permanent
+  metadata mismatches immediately. GitHub Release reconciliation validates
+  both the peeled tag SHA and `target_commitish`, and every workflow CLI call
+  must emit its command-specific liveness marker. The release contract runs
+  119/119 tests.
 - Removed the quarantined webhook templates from the production catalogue.
   They remain test fixtures only and make no HMAC/security promise.
 - Reverified MCP capability truth against `Frihet-io/frihet-mcp` main

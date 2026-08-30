@@ -12,6 +12,8 @@ const PACKAGE_NAME = 'n8n-nodes-frihet';
 const VERSION = '1.0.2';
 const TAG = `v${VERSION}`;
 const REPOSITORY = 'Frihet-io/n8n-nodes-frihet';
+const MAIN_BRANCH = 'main';
+const MAIN_REF = `refs/heads/${MAIN_BRANCH}`;
 const ENVIRONMENT = 'npm-release';
 const NODE_VERSION = 'v24.20.0';
 const NPM_VERSION = '11.19.0';
@@ -20,6 +22,9 @@ const GITHUB_API = 'https://api.github.com';
 const API_VERSION = '2026-03-10';
 const EVIDENCE_NAME = 'npm-pack-evidence.json';
 const READBACK_NAME = 'npm-readback.json';
+const REGISTRY_REQUEST_TIMEOUT_MS = 10_000;
+const REGISTRY_RETRY_ATTEMPTS = 12;
+const REGISTRY_RETRY_DELAY_MS = 10_000;
 const RELEASE_NAME = `${PACKAGE_NAME} v${VERSION}`;
 const RELEASE_BODY = [
 	`Immutable release for ${PACKAGE_NAME}@${VERSION}.`,
@@ -42,6 +47,17 @@ const EXPECTED_FILES = Object.freeze([
 
 function invariant(condition, message) {
 	if (!condition) throw new Error(message);
+}
+
+class RegistryTransientError extends Error {
+	constructor(message, cause) {
+		super(message, { cause });
+		this.name = 'RegistryTransientError';
+	}
+}
+
+function isTransientRegistryStatus(status) {
+	return status === 404 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function sorted(values) {
@@ -137,7 +153,7 @@ function buildPackEvidence(pack, tarball, sha) {
 	};
 }
 
-function validatePublishedPackage(manifest, tarball, evidence, expectedSha) {
+function validatePublishedManifest(manifest, evidence, expectedSha) {
 	invariant(manifest && typeof manifest === 'object', 'npm manifest is missing');
 	invariant(evidence.sha === expectedSha, 'Local pack evidence SHA does not match GITHUB_SHA');
 	invariant(manifest.name === PACKAGE_NAME, `Published package name mismatch: ${manifest.name}`);
@@ -148,6 +164,11 @@ function validatePublishedPackage(manifest, tarball, evidence, expectedSha) {
 	invariant(manifest.dist?.tarball === evidence.tarballUrl, 'Published tarball URL differs from expected pack');
 	invariant(manifest.dist?.fileCount === evidence.entryCount, 'Published file count differs from expected pack');
 	invariant(manifest.dist?.unpackedSize === evidence.unpackedSize, 'Published unpacked size differs from expected pack');
+	return true;
+}
+
+function validatePublishedPackage(manifest, tarball, evidence, expectedSha) {
+	validatePublishedManifest(manifest, evidence, expectedSha);
 	invariant(tarball.length === evidence.size, 'Downloaded tarball byte length differs from expected pack');
 	invariant(sha1(tarball) === evidence.shasum, 'Downloaded tarball shasum differs from expected pack');
 	invariant(integrity(tarball) === evidence.integrity, 'Downloaded tarball integrity differs from expected pack');
@@ -204,6 +225,10 @@ function validateReleaseRecord(release, tagTarget, expectedSha) {
 	invariant(tagTarget === expectedSha, `Tag ${TAG} points to ${tagTarget}, expected ${expectedSha}`);
 	invariant(release && typeof release === 'object', 'GitHub Release is missing');
 	invariant(release.tag_name === TAG, `GitHub Release tag mismatch: ${release.tag_name}`);
+	invariant(
+		[expectedSha, MAIN_BRANCH, MAIN_REF].includes(release.target_commitish),
+		`GitHub Release target_commitish mismatch: ${release.target_commitish}`,
+	);
 	invariant(release.name === RELEASE_NAME, `GitHub Release name mismatch: ${release.name}`);
 	invariant(release.body === RELEASE_BODY, 'GitHub Release body differs from the immutable release contract');
 	invariant(release.draft === false, 'GitHub Release must not be a draft');
@@ -231,7 +256,7 @@ function git(...args) {
 
 function validateDispatchContext(context) {
 	invariant(context.repository === REPOSITORY, `Unexpected repository: ${context.repository}`);
-	invariant(context.ref === 'refs/heads/main', `Release must run from main, got ${context.ref}`);
+	invariant(context.ref === MAIN_REF, `Release must run from main, got ${context.ref}`);
 	invariant(context.inputVersion === VERSION, `Release input must be ${VERSION}`);
 	invariant(context.sha === context.head, 'Checked-out HEAD differs from GITHUB_SHA');
 	invariant(context.status === '', 'Release worktree is dirty');
@@ -285,6 +310,41 @@ async function request(url, options = {}) {
 	return response;
 }
 
+async function registryRequest(url, options, label, requestImpl = request) {
+	try {
+		return await requestImpl(url, {
+			...options,
+			signal: options?.signal ?? AbortSignal.timeout(REGISTRY_REQUEST_TIMEOUT_MS),
+		});
+	} catch (error) {
+		throw new RegistryTransientError(`${label} network failure: ${error.message}`, error);
+	}
+}
+
+function rejectTransientRegistryStatus(response, label) {
+	if (isTransientRegistryStatus(response.status)) {
+		throw new RegistryTransientError(`${label} is transiently unavailable (${response.status})`);
+	}
+}
+
+async function readRegistryBody(response, method, label) {
+	try {
+		return await response[method]();
+	} catch (error) {
+		throw new RegistryTransientError(`${label} body read failed: ${error.message}`, error);
+	}
+}
+
+async function registryResponseJson(response, label) {
+	const body = await readRegistryBody(response, 'text', label);
+	if (!response.ok) throw new Error(`${label} failed (${response.status}): ${body.slice(0, 500)}`);
+	try {
+		return JSON.parse(body);
+	} catch (error) {
+		throw new Error(`${label} returned invalid JSON: ${error.message}`);
+	}
+}
+
 async function responseJson(response, label) {
 	const text = await response.text();
 	if (!response.ok) throw new Error(`${label} failed (${response.status}): ${text.slice(0, 500)}`);
@@ -318,15 +378,27 @@ function createPackEvidence() {
 	}
 }
 
-async function fetchPublishedPackage() {
-	const manifestResponse = await request(`${REGISTRY}/${PACKAGE_NAME}/${VERSION}`, {
+async function fetchPublishedPackage(evidence, expectedSha, requestImpl = request) {
+	const manifestResponse = await registryRequest(`${REGISTRY}/${PACKAGE_NAME}/${VERSION}`, {
 		headers: { Accept: 'application/json' },
-	});
+	}, 'npm manifest readback', requestImpl);
 	if (manifestResponse.status === 404) return null;
-	const manifest = await responseJson(manifestResponse, 'npm manifest readback');
-	const tarballResponse = await request(manifest.dist?.tarball, { headers: { Accept: 'application/octet-stream' } });
-	if (!tarballResponse.ok) throw new Error(`npm tarball readback failed (${tarballResponse.status})`);
-	return { manifest, tarball: Buffer.from(await tarballResponse.arrayBuffer()) };
+	rejectTransientRegistryStatus(manifestResponse, 'npm manifest readback');
+	const manifest = await registryResponseJson(manifestResponse, 'npm manifest readback');
+	validatePublishedManifest(manifest, evidence, expectedSha);
+	const tarballResponse = await registryRequest(
+		manifest.dist.tarball,
+		{ headers: { Accept: 'application/octet-stream' } },
+		'npm tarball readback',
+		requestImpl,
+	);
+	rejectTransientRegistryStatus(tarballResponse, 'npm tarball readback');
+	if (!tarballResponse.ok) {
+		const body = await readRegistryBody(tarballResponse, 'text', 'npm tarball readback');
+		throw new Error(`npm tarball readback failed (${tarballResponse.status}): ${body.slice(0, 500)}`);
+	}
+	const tarball = await readRegistryBody(tarballResponse, 'arrayBuffer', 'npm tarball readback');
+	return { manifest, tarball: Buffer.from(tarball) };
 }
 
 function appendOutput(name, value) {
@@ -336,26 +408,55 @@ function appendOutput(name, value) {
 
 async function registryDecision() {
 	const evidence = readJson(runnerFile(EVIDENCE_NAME));
-	const published = await fetchPublishedPackage();
+	const published = await fetchPublishedPackage(evidence, process.env.GITHUB_SHA);
 	const decision = decideRegistryAction(published, evidence, process.env.GITHUB_SHA);
 	if (decision.readback) writeJson(runnerFile(READBACK_NAME), decision.readback);
 	appendOutput('exists', decision.exists ? 'true' : 'false');
 	return decision;
 }
 
+async function reconcileRegistryReadback({
+	attempts,
+	delayMs,
+	evidence,
+	expectedSha,
+	fetchPublished,
+	sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+}) {
+	invariant(Number.isInteger(attempts) && attempts > 0, 'Registry retry attempts must be a positive integer');
+	invariant(Number.isInteger(delayMs) && delayMs >= 0, 'Registry retry delay must be a non-negative integer');
+	let lastTransient;
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		try {
+			const published = await fetchPublished();
+			if (published === null) {
+				throw new RegistryTransientError(`${PACKAGE_NAME}@${VERSION} manifest is not readable yet (404)`);
+			}
+			return validatePublishedPackage(published.manifest, published.tarball, evidence, expectedSha);
+		} catch (error) {
+			if (!(error instanceof RegistryTransientError)) throw error;
+			lastTransient = error;
+		}
+		if (attempt < attempts) await sleep(delayMs);
+	}
+	throw new Error(
+		`${PACKAGE_NAME}@${VERSION} did not become fully readable after ${attempts} attempts: ${lastTransient.message}`,
+		{ cause: lastTransient },
+	);
+}
+
 async function reconcileRegistry(retry) {
 	const evidence = readJson(runnerFile(EVIDENCE_NAME));
-	const attempts = retry ? 12 : 1;
-	for (let attempt = 1; attempt <= attempts; attempt += 1) {
-		const published = await fetchPublishedPackage();
-		if (published) {
-			const readback = validatePublishedPackage(published.manifest, published.tarball, evidence, process.env.GITHUB_SHA);
-			writeJson(runnerFile(READBACK_NAME), readback);
-			return readback;
-		}
-		if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 10_000));
-	}
-	throw new Error(`${PACKAGE_NAME}@${VERSION} did not become readable from npm`);
+	const expectedSha = process.env.GITHUB_SHA;
+	const readback = await reconcileRegistryReadback({
+		attempts: retry ? REGISTRY_RETRY_ATTEMPTS : 1,
+		delayMs: retry ? REGISTRY_RETRY_DELAY_MS : 0,
+		evidence,
+		expectedSha,
+		fetchPublished: () => fetchPublishedPackage(evidence, expectedSha),
+	});
+	writeJson(runnerFile(READBACK_NAME), readback);
+	return readback;
 }
 
 function githubHeaders() {
@@ -469,33 +570,50 @@ async function main() {
 		case 'reconcile-github-release':
 			await reconcileGitHubRelease();
 			break;
+		case 'selftest':
+			break;
 		default:
 			throw new Error(`Unknown release-control command: ${command ?? '<missing>'}`);
 	}
+	return command;
+}
+
+function cliSuccessMarker(command) {
+	return `release-control:${command}:ok`;
 }
 
 module.exports = {
 	EXPECTED_FILES,
 	PACKAGE_NAME,
+	REGISTRY_REQUEST_TIMEOUT_MS,
+	REGISTRY_RETRY_ATTEMPTS,
+	REGISTRY_RETRY_DELAY_MS,
 	RELEASE_BODY,
 	RELEASE_NAME,
 	TAG,
 	VERSION,
 	buildPackEvidence,
+	cliSuccessMarker,
 	decideRegistryAction,
+	fetchPublishedPackage,
+	isTransientRegistryStatus,
 	parseTarFiles,
+	reconcileRegistryReadback,
 	resolveTagTargetFromObjects,
 	validateDispatchContext,
 	validateEnvironmentPolicy,
 	validateFileContract,
 	validateMetadataContract,
+	validatePublishedManifest,
 	validatePublishedPackage,
 	validateReleaseRecord,
 };
 
 if (require.main === module) {
-	main().catch((error) => {
-		console.error(error);
-		process.exit(1);
-	});
+	main()
+		.then((command) => console.log(cliSuccessMarker(command)))
+		.catch((error) => {
+			console.error(error);
+			process.exit(1);
+		});
 }
