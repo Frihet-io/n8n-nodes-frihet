@@ -3,10 +3,10 @@
 Ready-to-import n8n workflow templates for [Frihet ERP](https://frihet.io). All
 templates use the `n8n-nodes-frihet` community node.
 
-> **Two webhook-receiver templates are quarantined.** See
-> [`unverified-webhooks/`](./unverified-webhooks/) for the disposition.
-> The remaining 6 templates in this folder are the safe, ready-to-use
-> set.
+> **Only the six top-level JSON files are ready to import.** Two legacy
+> webhook-receiver files remain under [`unverified-webhooks/`](./unverified-webhooks/)
+> as quarantined audit evidence. They are not production templates, must not be
+> imported or activated, and do not implement HMAC verification.
 
 ## Prerequisites
 
@@ -29,7 +29,10 @@ templates use the `n8n-nodes-frihet` community node.
 ### 1. `stripe-payment-to-invoice.json`
 **Stripe Payment → Create & Send Invoice**
 
-Triggered by `payment_intent.succeeded` on Stripe. Extracts payment data, creates a Frihet invoice, marks it as paid (payment method: Stripe), and sends it to the customer.
+Triggered by `payment_intent.succeeded` on Stripe. Extracts payment data,
+creates a Frihet invoice, marks a legacy invoice as paid, and sends it to the
+customer. The Frihet node never forwards a payment-method field and fails
+closed if the invoice is governed by Payment Authority V1.
 
 **Nodes:** Stripe Trigger → Set (extract fields) → Frihet (create invoice) → Frihet (mark paid) → Frihet (send invoice)
 
@@ -78,22 +81,7 @@ Runs Monday–Friday at 9am. Lists all overdue invoices, filters those with a cl
 
 ---
 
-### 5. `new-client-to-hubspot.json`
-**New Frihet Client → HubSpot Contact**
-
-Receives Frihet webhook events for `client.created`. Maps the client fields to HubSpot contact properties and upserts the contact (creates or updates by email). Tags the contact with `lead_source: Frihet ERP` and stores the Frihet client ID as a custom property.
-
-**Nodes:** Webhook (client.created) → Respond 200 → Filter (verify event) → Set (map fields) → HubSpot (upsert contact) → HubSpot (add custom properties)
-
-**Credentials needed:** HubSpot API, Frihet API (for webhook secret verification)
-
-**Setup:**
-- Configure Frihet to send webhooks to `https://your-n8n.com/webhook/frihet-client-created`
-- Create HubSpot custom properties: `frihet_client_id`, `tax_id`, `lead_source`
-
----
-
-### 6. `shopify-order-to-invoice.json`
+### 5. `shopify-order-to-invoice.json`
 **Shopify Order → Create & Send Invoice**
 
 Triggered when a new Shopify order is created. Searches Frihet for an existing client matching the customer email. If not found, creates the client first. Builds invoice line items from Shopify order items (including shipping), creates the invoice in Frihet, and sends it to the customer.
@@ -106,7 +94,7 @@ Triggered when a new Shopify order is created. Searches Frihet for an existing c
 
 ---
 
-### 7. `weekly-financial-digest.json`
+### 6. `weekly-financial-digest.json`
 **Weekly Financial Digest → Slack**
 
 Runs every Monday at 8am. Fetches all invoices and expenses from the previous 7 days. Calculates revenue (paid/pending/overdue), total expenses, net profit, profit margin, and top clients by revenue. Posts a formatted Markdown message to a Slack channel.
@@ -119,59 +107,22 @@ Runs every Monday at 8am. Fetches all invoices and expenses from the previous 7 
 
 ---
 
-### 8. `quote-accepted-to-invoice.json`
-**Quote Accepted → Auto-Create & Send Invoice**
-
-Receives Frihet webhook events for `quote.accepted`. Fetches the full quote from the API, maps all line items and client data to an invoice, sets a 30-day due date, creates the invoice, sends it to the client, and notifies the internal team by email.
-
-**Nodes:** Webhook (quote.accepted) → Respond 200 → Filter (verify event) → Set (extract quote ID) → Frihet (get quote) → Code (map fields) → Frihet (create invoice) → Frihet (send invoice) → Email (notify team)
-
-**Credentials needed:** Frihet API, SMTP Email
-
-**Setup:**
-- Configure Frihet to send webhooks to `https://your-n8n.com/webhook/frihet-quote-accepted`
-- Set `FINANCE_EMAIL` for internal notification
-
----
-
 ## Environment Variables
 
 | Variable | Used In | Description |
 |----------|---------|-------------|
-| `FINANCE_EMAIL` | Templates 2, 3, 4, 8 | Internal email for reports and alerts |
-| `SLACK_CHANNEL_ID` | Template 7 | Slack channel ID for weekly digest |
+| `FINANCE_EMAIL` | Templates 2, 3, 4 | Internal email for reports and alerts |
+| `SLACK_CHANNEL_ID` | Template 6 | Slack channel ID for weekly digest |
 
 Set these in n8n under **Settings → Environment Variables** (self-hosted) or directly in the node parameters.
 
----
+## QUARANTINED webhook evidence
 
-## Frihet Webhook Configuration
-
-For templates 5 and 8, configure webhooks in your Frihet settings:
-
-- **client.created** → `https://your-n8n.instance/webhook/frihet-client-created`
-- **quote.accepted** → `https://your-n8n.instance/webhook/frihet-quote-accepted`
-
-The webhook payload is the **resource snapshot** wrapped under the resource key
-(matches the ERP `triggerWebhooks` envelope in `webhooks.ts:527-560`):
-
-```json
-{
-  "client": { "id": "...", "name": "...", "email": "...", ... }
-}
-```
-
-For `quote.accepted`:
-```json
-{
-  "quote": { "id": "...", "documentsNumber": "...", "clientId": "...", ... }
-}
-```
-
-The event type is also carried in the `X-Frihet-Event` header, separately
-from the body. If a `secret` is configured on the webhook subscription, the
-delivery also carries `X-Frihet-Signature: sha256=<hex>` (HMAC-SHA256 of the
-raw body).
+`unverified-webhooks/new-client-to-hubspot.json` and
+`unverified-webhooks/quote-accepted-to-invoice.json` are retained only so the
+broken event filter and absent receiver-side signature verification remain
+testable. They are intentionally excluded from this catalogue. There is no
+supported production setup for those files in version 1.0.2.
 
 ---
 

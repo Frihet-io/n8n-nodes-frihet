@@ -4,6 +4,10 @@ n8n community node for [Frihet](https://frihet.io) — AI-native business manage
 
 Create invoices, manage expenses, sync clients, and automate your business workflows from n8n.
 
+> **Release status:** this branch prepares `1.0.2`; it is not evidence of an
+> npm publication. The registry version remains `1.0.1` until the protected,
+> manually dispatched OIDC release workflow completes and its readback passes.
+
 ## Installation
 
 ### n8n Cloud / Self-hosted UI
@@ -64,7 +68,7 @@ Optionally set a custom **Base URL** for self-hosted Frihet deployments.
 - CRM stages on clients (lead, contacted, proposal, active, inactive, lost)
 - Structured address support on clients, vendors, invoices, and quotes
 - Send invoices and quotes directly by email from n8n workflows
-- Mark invoices as paid with optional payment date and method
+- Mark legacy invoices as paid with an optional payment date; V1 invoices fail closed
 - Expense categories, tax deductibility, and investment goods flags
 
 ## Tax Zones (Spain)
@@ -109,13 +113,14 @@ defensively. The server defaults `currency` to EUR and resolves
 `clientEmail` from the client doc. See `CONTRACT_MATRIX.md` §3.1.A
 for the canonical schema.
 
-**Templates:** 6 of 8 templates in the `templates/` folder are
-ready-to-use. **2 templates (`new-client-to-hubspot`,
-`quote-accepted-to-invoice`) are quarantined to
+**Templates:** the six top-level JSON templates are ready-to-use. **Two legacy
+webhook templates (`new-client-to-hubspot`,
+`quote-accepted-to-invoice`) are quarantined under
 `templates/unverified-webhooks/`** — their event-type filter is broken
 (server emits `X-Frihet-Event` header, the body has no `event` key)
 and the receiving workflow has no n8n-native way to verify the
-HMAC signature. See `CONTRACT_MATRIX.md` §6.
+HMAC signature. They are not production-usable and must not be imported or
+activated. See `CONTRACT_MATRIX.md` §6.
 
 **Wave 2** — planned but not yet shipped:
 - Extended resource coverage (bank accounts, fiscal calendar, VeriFactu/TicketBAI signed-invoice flows, Facturae e-invoice export, payment splits)
@@ -124,7 +129,14 @@ HMAC signature. See `CONTRACT_MATRIX.md` §6.
 - `Idempotency-Key` propagation on fiscal writes (currently the node does
   not emit it; retries of fiscal writes can produce duplicate fiscal numbers)
 
-The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server) (`@frihet/mcp-server@1.16.6` at frihet-mcp main `30534c8`) exposes 157 canonical operations for invoicing, expenses, CRM, banking, POS, and ES/EU fiscal workflows, with conservative capability and side-effect metadata. **It does NOT expose a Payment Authority V1 write tool** — its `mark_invoice_paid` wraps the same legacy REST endpoint and has the same V1 divergence risk. Use the Frihet app's Payment Authority V1 UI for V1 mark-paid.
+The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server)
+source is `1.17.0` at `Frihet-io/frihet-mcp` main
+`64934a5aa3377534756a87692f48d42c4bd58e4f`; npm remains `1.16.6`
+until that separate release is published. The source exposes 162 canonical
+operations with conservative capability and side-effect metadata. **It does
+not expose a Payment Authority V1 write tool** — `mark_invoice_paid` wraps the
+same legacy REST endpoint and has the same V1 divergence risk. Use the Frihet
+app's Payment Authority V1 UI for V1 mark-paid.
 
 ## Links
 

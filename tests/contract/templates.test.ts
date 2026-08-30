@@ -166,4 +166,24 @@ describe('templates/ — contract sanity', () => {
 			}
 		}
 	});
+
+	it('keeps quarantined webhook files out of the production catalogue', () => {
+		const catalogue = fs.readFileSync(path.join(TEMPLATES_DIR, 'README.md'), 'utf8');
+		expect(catalogue).toContain('QUARANTINED');
+		expect(catalogue).toContain('do not implement HMAC verification');
+		expect(catalogue).not.toMatch(/^### \d+\. `(?:new-client-to-hubspot|quote-accepted-to-invoice)\.json`/m);
+		expect(catalogue).not.toContain('Configure Frihet to send webhooks');
+		expect(catalogue).not.toContain('for webhook secret verification');
+	});
+
+	it('states that quarantined webhooks have no production-safe setup', () => {
+		const quarantine = fs.readFileSync(
+			path.join(TEMPLATES_DIR, 'unverified-webhooks/README.md'),
+			'utf8',
+		);
+		expect(quarantine).toContain('QUARANTINED, NOT FOR PRODUCTION');
+		expect(quarantine).toContain('no receiver-side HMAC verification');
+		expect(quarantine).toContain('no production-safe template is shipped');
+		expect(quarantine).not.toContain('security by obscurity');
+	});
 });

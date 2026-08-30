@@ -1,7 +1,7 @@
 # CONTRACT_MATRIX — n8n-nodes-frihet vs Frihet ERP
 
-**Audit date:** 2026-08-20
-**n8n-nodes-frihet ref:** `audit/frihet-contract-truth-r2-2026-08` (R1 = `b0e2f8f`, R2 new SHA in commit log)
+**Audit date:** 2026-08-30
+**n8n-nodes-frihet ref:** `codex/n8n-1.0.2-release` (unpublished 1.0.2 candidate)
 **Canonical authority:** `berthelius/Frihet-ERP` `origin/main` = `d5f3f3cdfdead47880f611696d25066dcb2b8051`
 **Public API reference:** `functions/src/publicApi.ts` (9,623 lines, strict zod schemas)
 **Webhook reference:** `functions/src/webhooks.ts` + `functions/src/webhookTriggers.ts`
@@ -25,13 +25,13 @@ sandboxed evaluator against the actual Frihet webhook payload.
 | Operations | 33 |
 | Workflow templates (ready-to-use) | 6 (was 8; **2 quarantined** — see §6) |
 | Workflow templates (unverified-webhooks/) | 2 (see §6 for the why) |
-| Contract tests | **66** (was 52 in R1) |
+| Contract tests | **81** (66 contract tests from R3 + 15 release/template-policy assertions) |
 | Defects reproduced | 5 (R1) + **5 more (R2)** |
 | Defects fixed in this PR | 5 (R1) + 5 (R2) |
 | Coverage of the public REST surface | **~20 %** |
 | Coverage of the full ERP API (incl. callable CFs, MCP) | **~5 %** |
-| R3 lockfile regen | `package-lock.json` in sync with `package.json` (362 packages, version 1.0.1, lockfile 3) |
-| R3 docs correction | Phantom `@frihet/mcp-server` Payment Authority tool removed — reverified at `berthelius/frihet-mcp origin/main = 30534c8`, no V1 write tool exists. Pointed to the Frihet app UI instead. |
+| R4 package contract | `package-lock.json` in sync with `package.json` at unpublished candidate `1.0.2`; `node_modules` is not tracked; `dist` and pack allowlist are gated |
+| R4 MCP truth | Reverified at `Frihet-io/frihet-mcp` main `64934a5aa3377534756a87692f48d42c4bd58e4f` (source `1.17.0`, npm still `1.16.6`): no V1 write tool exists |
 
 R2 BLOCKERS closed:
 
@@ -237,7 +237,7 @@ if (v1 === 1) {
     `The legacy REST /paid endpoint does NOT update V1's forward-only ledger... ` +
     `To mark this V1 invoice paid, use the Frihet app's Payment Authority V1 UI — ` +
     `it calls postInvoicePaymentV1 (a Firebase Callable) and is the only supported ` +
-    `surface today. The @frihet/mcp-server (main 30534c8) does NOT expose a V1 write ` +
+    `surface today. The @frihet/mcp-server does NOT expose a V1 write ` +
     `tool — its mark_invoice_paid wraps the same legacy REST endpoint and has the same ` +
     `divergence risk. The legacy markPaid action is BLOCKED for V1 invoices.`);
 }
@@ -245,8 +245,10 @@ if (v1 === 1) {
 
 `postInvoicePaymentV1` is a Firebase callable, not REST. The
 R2 (and R1) docs pointed to a phantom `@frihet/mcp-server`
-"Payment Authority tool" that does NOT exist. R3 reverified
-`berthelius/frihet-mcp origin/main = 30534c8e1764ef1719413d86243e28ca521dae87`:
+"Payment Authority tool" that does NOT exist. R4 reverified
+`Frihet-io/frihet-mcp` main
+`64934a5aa3377534756a87692f48d42c4bd58e4f` (source `1.17.0`, npm
+still `1.16.6`):
 no `postInvoicePaymentV1`, no `reverseInvoicePaymentV1`, no
 `listInvoicePaymentsV1` — only `mark_invoice_paid` (which wraps
 the same legacy REST endpoint). The n8n community node does
@@ -320,14 +322,11 @@ API, draining the owner's API quota.
 
 ### What would unblock them
 
-1. n8n ships a generic HMAC-verified webhook trigger that exposes
-   the signature header (or a pre-verified `verified: true` flag).
-2. We add a Frihet-specific trigger node that wraps the Webhook
-   node implementation with HMAC verification in the same module.
-3. The user accepts "security by obscurity" via the per-webhook URL
-   allowlist + IP allowlist on the Frihet side.
-
-None of these are in scope for this PR.
+A Frihet-specific receiver must verify the raw-body HMAC before any
+credentialed action and derive the event type from an authenticated value.
+That implementation and its tests do not exist in this package version. A
+secret URL, allowlist, header presence, or documentation alone is not an
+acceptable substitute, so the two files are not production-usable.
 
 ### What users do today
 
@@ -408,8 +407,8 @@ This is a real gap for fiscal writes. Adding propagation is Wave 2.
 ```
 $ npm run build && npm test
 …
-Test Suites: 3 passed, 3 total
-Tests:       66 passed, 66 total
+Test Suites: 4 passed, 4 total
+Tests:       81 passed, 81 total
 ```
 
 - `tests/contract/invoice.test.ts` — 18 tests: `markPaid`
@@ -417,14 +416,17 @@ Tests:       66 passed, 66 total
   required + trim + clear error), list pagination (cursor + real
   cursor + truncated surfacing), invoice create schema, URL/auth
   header, error envelope, UI surface assertions.
-- `tests/contract/templates.test.ts` — 41 assertions (6 templates ×
-  sanity checks). The 2 quarantined templates are NOT included in
-  the ready-to-use invariants.
+- `tests/contract/templates.test.ts` — 43 assertions (6 templates ×
+  sanity checks plus two quarantine-policy guards). The 2 quarantined
+  templates are NOT included in the ready-to-use invariants.
 - `tests/contract/webhook-expressions.test.ts` — 7 tests that
   actually RUN the templates' literal `{{ ... }}` and `={{ ... }}`
   expressions through a sandboxed evaluator (`vm.runInNewContext`)
   against the real Frihet webhook payload. Reproduces B4 (filter
   broken) and B6 (Liquid `| trim`, markPaid response).
+- `tests/contract/release.test.ts` — 13 tests pin the workflow guards,
+  execute nine negative mutants, enforce package/lock parity, reject tracked
+  dependencies, and inspect the exact 10-file npm pack allowlist.
 
 Reproducible from clean checkout:
 
@@ -487,8 +489,9 @@ templates/README.md                                    — updated
 tests/_helpers/n8n-mock.ts                             — IExecuteFunctions harness
 tests/_helpers/n8n-expression.ts                       — n8n expression evaluator (R2)
 tests/contract/invoice.test.ts                         — 18 tests (was 11 in R1)
-tests/contract/templates.test.ts                       — 41 assertions
+tests/contract/templates.test.ts                       — 43 assertions
 tests/contract/webhook-expressions.test.ts              — 7 tests (R2 NEW)
+tests/contract/release.test.ts                         — 13 release/package assertions
 jest.config.js                                         — minimal ts-jest
 tsconfig.test.json                                     — test tsconfig
 tsconfig.json                                          — excludes tests/
@@ -499,26 +502,18 @@ package-lock.json                                     — R3 regen: in sync with
 CONTRACT_MATRIX.md                                     — this file
 ```
 
-**R3 changes** (canonical `berthelius/frihet-mcp origin/main = 30534c8`):
+**R4 release-candidate changes** (canonical `Frihet-io/frihet-mcp` main
+`64934a5aa3377534756a87692f48d42c4bd58e4f`):
 - `nodes/Frihet/Frihet.node.ts` — error message updated to point to
   the Frihet app's Payment Authority V1 UI instead of the
   phantom `@frihet/mcp-server` tool.
-- `README.md` — operations table note + Roadmap + MCP Server
-  reference updated to remove the phantom tool and reflect the
-  current `mcp-server@1.16.6` version.
-- `CHANGELOG.md` — R3 section added (lockfile regen + phantom
-  MCP tool removed + vendored node_modules updated to match
-  the new lockfile).
-- `CONTRACT_MATRIX.md` — §4.3 (B1/B2) updated with the actual
-  Frihet-mcp main SHA + the honest "no V1 write tool" finding;
-  §13 files-touched table updated.
-
-No `package.json` version bump, no `npm publish`, no credentials
-mutation, no backend change. `package-lock.json` was the only
-file mutated by the dependency-resolution step. The vendored
-`node_modules/` was reinstalled from the new lockfile to keep
-the offline fallback in sync (the install picked up additional
-lockfile-pinned transitives, so the new tree SHA differs from
-the previous `7c0ec1c...`). CI uses `npm ci` (not the vendored
-tree), so this is independent of the deterministic install
-contract.
+- `README.md`, `CHANGELOG.md`, `OFFICIAL_NODE_GUIDE.md`, and this matrix
+  distinguish source candidates from registry publications and pin the
+  current MCP source authority without claiming its pending npm release.
+- `node_modules/**` is no longer tracked. CI and release install only from
+  `package-lock.json` and reject any reintroduced tracked dependency.
+- `.github/workflows/release.yml` is manual, main-only, environment-protected,
+  OIDC-only, and fail-closed across version, SHA, clean-tree, existence,
+  build/test/pack, and immutable npm readback gates.
+- The source version is `1.0.2`; no npm publish, tag, release, credentials,
+  or backend mutation is part of this PR.

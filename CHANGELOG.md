@@ -3,7 +3,34 @@
 All notable changes to `n8n-nodes-frihet` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased] - 2026-08-20
+## [Unreleased] — 1.0.2 release candidate - 2026-08-30
+
+`package.json` and `package-lock.json` identify this source as `1.0.2`, but
+that version has **not** been published. The npm registry still serves
+`1.0.1` (`gitHead db1208d67c32a2bd46d734d02ab95fb3e5a0a0d6`) until the
+protected release workflow succeeds and its immutable readback passes.
+
+### R4 — reproducible package and release control plane
+
+- Removed all 3,640 tracked `node_modules/**` paths from Git while retaining
+  the lockfile-driven local install contract.
+- Pinned CI actions, added package/lock parity, tracked-dependency, committed
+  `dist`, npm pack allowlist, production audit, and Node 20/22 gates.
+- Added a manual-main-only `1.0.2` release workflow. It requires the protected
+  `npm-release` environment, exact repository/main/SHA, a clean tree, a
+  negative npm-version check, OIDC trusted publishing with provenance, and
+  registry readback of `gitHead`, integrity, shasum, tarball URL, file count,
+  and unpacked size. It contains no npm token and has not been dispatched.
+- Added adversarial tests for stale version, wrong repo/ref/SHA, dirty tree,
+  existing npm version, tracked dependencies, source/`dist` drift, and unsafe
+  self-approval, webhook-template claims, and other bypasses. The release
+  candidate runs 81/81 tests.
+- Removed the quarantined webhook templates from the production catalogue.
+  They remain test fixtures only and make no HMAC/security promise.
+- Reverified MCP capability truth against `Frihet-io/frihet-mcp` main
+  `64934a5aa3377534756a87692f48d42c4bd58e4f` (source version `1.17.0`):
+  `mark_invoice_paid` is still legacy REST and no Payment Authority V1 write
+  tool exists. The npm MCP release remains `1.16.6` pending its own publish.
 
 ### R3 — second-pass corrections (control-plane CI live finding)
 
@@ -27,7 +54,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   removed.** R2 docs (CONTRACT_MATRIX, README, CHANGELOG, the
   node's error message) pointed to a non-existent `@frihet/mcp-server`
   Payment Authority tool. Reverified at `berthelius/frihet-mcp
-  origin/main = 30534c8e1764ef1719413d86243e28ca521dae87`:
+  source main (reverified for R4 at
+  `64934a5aa3377534756a87692f48d42c4bd58e4f`):
   no `postInvoicePaymentV1`, no `reverseInvoicePaymentV1`, no
   `listInvoicePaymentsV1` — only `mark_invoice_paid` which wraps
   the same legacy REST endpoint and carries the same
@@ -35,7 +63,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with: "use the Frihet app's Payment Authority V1 UI (which
   calls the `postInvoicePaymentV1` Firebase Callable) — the only
   supported surface today." All R2 fixes preserved.
-- **Vendored `node_modules/` updated to match the new lockfile.**
+- **Vendored `node_modules/` updated to match the new lockfile (historical R3 state).**
   The clean-checkout install (362 packages) replaced the
   pre-existing vendored tree. The new tree SHA differs from
   the previous `7c0ec1c...` because the install picked up
@@ -43,8 +71,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   reliance on the vendored tree); the vendored copy is the
   offline fallback for users who can't reach the npm registry.
 - **Frihet MCP Server version reference updated** from
-  `@1.12.0` (R1) / `@1.12.0` (R2) to `@1.16.6` (R3, current
-  frihet-mcp main `30534c8`).
+  `@1.12.0` (R1/R2) to the then-current npm `@1.16.6`. R4 supersedes
+  the source provenance with the exact `1.17.0` candidate above.
 
 #### Preserved from R2 (no regressions)
 
@@ -227,7 +255,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   node pre-fetches and fail-closes V1 invoices on `markPaid`.
   For V1 mark-paid, use the Frihet app's Payment Authority V1
   UI (which calls the `postInvoicePaymentV1` Firebase Callable).
-  The `@frihet/mcp-server` (main `30534c8`) does NOT expose a
+  The `@frihet/mcp-server` source (main
+  `64934a5aa3377534756a87692f48d42c4bd58e4f`) does NOT expose a
   V1 write tool — its `mark_invoice_paid` wraps the same legacy
   REST endpoint and has the same divergence risk.
 

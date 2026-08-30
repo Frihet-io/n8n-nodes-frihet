@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -12,9 +15,12 @@ jobs:
       matrix:
         node-version: [20.x, 22.x]
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out exact revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -22,5 +28,15 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Typecheck + build
         run: npm run build
+      - name: Verify committed dist is reproducible
+        run: git diff --exit-code -- dist
+      - name: Verify package metadata and dependency hygiene
+        run: |
+          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version||p.version!==l.packages[''].version) throw new Error('package/lock version drift')"
+          test -z "$(git ls-files node_modules)"
       - name: Run contract tests
-        run: npm test
+        run: npm run test:ci
+      - name: Verify publish allowlist
+        run: npm pack --dry-run --json --ignore-scripts
+      - name: Audit production dependency surface
+        run: npm audit --omit=dev
