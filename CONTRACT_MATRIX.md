@@ -1,7 +1,7 @@
 # CONTRACT_MATRIX — n8n-nodes-frihet vs Frihet ERP
 
 **Audit date:** 2026-08-30
-**n8n-nodes-frihet ref:** `codex/n8n-1.0.2-release` (unpublished 1.0.2 candidate)
+**n8n-nodes-frihet ref:** `codex/n8n-1.0.2-release` (`1.0.2` source contract)
 **Canonical authority:** `berthelius/Frihet-ERP` `origin/main` = `d5f3f3cdfdead47880f611696d25066dcb2b8051`
 **Public API reference:** `functions/src/publicApi.ts` (9,623 lines, strict zod schemas)
 **Webhook reference:** `functions/src/webhooks.ts` + `functions/src/webhookTriggers.ts`
@@ -25,12 +25,12 @@ sandboxed evaluator against the actual Frihet webhook payload.
 | Operations | 33 |
 | Workflow templates (ready-to-use) | 6 (was 8; **2 quarantined** — see §6) |
 | Workflow templates (unverified-webhooks/) | 2 (see §6 for the why) |
-| Contract tests | **82** (66 contract tests from R3 + 16 release/template-policy assertions) |
+| Contract tests | **93** (66 contract tests from R3 + 27 release/template-policy assertions) |
 | Defects reproduced | 5 (R1) + **5 more (R2)** |
 | Defects fixed in this PR | 5 (R1) + 5 (R2) |
 | Coverage of the public REST surface | **~20 %** |
 | Coverage of the full ERP API (incl. callable CFs, MCP) | **~5 %** |
-| R4 package contract | `package-lock.json` in sync with `package.json` at unpublished candidate `1.0.2`; `node_modules` is not tracked; `dist` and pack allowlist are gated |
+| R4 package contract | `package-lock.json` in sync with `package.json` at source version `1.0.2`; `node_modules` is not tracked; `dist` and pack allowlist are gated |
 | R4 MCP truth | Reverified at `Frihet-io/frihet-mcp` main `64934a5aa3377534756a87692f48d42c4bd58e4f` (source `1.17.0`, npm still `1.16.6`): no V1 write tool exists |
 
 R2 BLOCKERS closed:
@@ -408,7 +408,7 @@ This is a real gap for fiscal writes. Adding propagation is Wave 2.
 $ npm run build && npm test
 …
 Test Suites: 4 passed, 4 total
-Tests:       82 passed, 82 total
+Tests:       93 passed, 93 total
 ```
 
 - `tests/contract/invoice.test.ts` — 18 tests: `markPaid`
@@ -425,15 +425,16 @@ Tests:       82 passed, 82 total
   expressions through a sandboxed evaluator (`vm.runInNewContext`)
   against the real Frihet webhook payload. Reproduces B4 (filter
   broken) and B6 (Liquid `| trim`, markPaid response).
-- `tests/contract/release.test.ts` — 13 tests pin the workflow guards,
-  execute nine negative mutants, enforce package/lock parity, reject tracked
-  dependencies, and inspect the exact 10-file npm pack allowlist.
+- `tests/contract/release.test.ts` — 24 tests parse the release YAML
+  structurally, execute negative provenance/environment/npm/tag/workflow
+  mutants, enforce package/lock parity, reject tracked dependencies, and
+  inspect the exact 10-file npm pack bytes and allowlist.
 
 Reproducible from clean checkout:
 
 - `package.json` declares `test` and `test:ci` scripts
 - devDependencies pinned: `jest@30.4.2`, `ts-jest@29.4.11`,
-  `@types/jest@30.0.0`, `typescript@5.9.3`
+  `@types/jest@30.0.0`, `typescript@5.9.3`, `yaml@2.9.0`
 - `package-lock.json` committed (deterministic install)
 - `.github/workflows/ci.yml` runs `npm ci && npm run build && npm test`
   on Node 20.x and 22.x
@@ -492,7 +493,7 @@ tests/_helpers/n8n-expression.ts                       — n8n expression evalua
 tests/contract/invoice.test.ts                         — 18 tests (was 11 in R1)
 tests/contract/templates.test.ts                       — 44 assertions
 tests/contract/webhook-expressions.test.ts              — 7 tests (R2 NEW)
-tests/contract/release.test.ts                         — 13 release/package assertions
+tests/contract/release.test.ts                         — 24 release/package assertions
 jest.config.js                                         — minimal ts-jest
 tsconfig.test.json                                     — test tsconfig
 tsconfig.json                                          — excludes tests/
@@ -514,7 +515,9 @@ CONTRACT_MATRIX.md                                     — this file
 - `node_modules/**` is no longer tracked. CI and release install only from
   `package-lock.json` and reject any reintroduced tracked dependency.
 - `.github/workflows/release.yml` is manual, main-only, environment-protected,
-  OIDC-only, and fail-closed across version, SHA, clean-tree, existence,
-  build/test/pack, and immutable npm readback gates.
+  OIDC-only, and retry-safe across version, SHA, clean-tree, build/test/pack,
+  exact existing-or-missing npm reconciliation, and immutable tag/Release
+  gates. An existing npm version is accepted only when its metadata and
+  downloaded bytes match the locally built 10-file tarball exactly.
 - The source version is `1.0.2`; no npm publish, tag, release, credentials,
   or backend mutation is part of this PR.

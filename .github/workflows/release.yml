@@ -10,7 +10,8 @@ on:
         type: string
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -19,7 +20,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish immutable npm package
+    name: Reconcile immutable npm and GitHub release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm-release
@@ -38,63 +39,20 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Fail closed on dispatch provenance
+      - name: Verify dispatch provenance
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          test "$GITHUB_REPOSITORY" = "Frihet-io/n8n-nodes-frihet"
-          test "$GITHUB_REF" = "refs/heads/main"
-          test "$INPUT_VERSION" = "1.0.2"
-          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain=v1)"
-          test -z "$(git ls-files node_modules)"
+        run: node .github/scripts/release-control.cjs verify-dispatch
 
       - name: Verify protected release environment
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node <<'NODE'
-          (async () => {
-          const headers = {
-            Accept: 'application/vnd.github+json',
-            Authorization: `Bearer ${process.env.GH_TOKEN}`,
-            'X-GitHub-Api-Version': '2026-03-10',
-          };
-          const url = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/environments/npm-release`;
-          const response = await fetch(url, { headers });
-          if (!response.ok) throw new Error(`Cannot prove npm-release environment policy (${response.status})`);
-          const environment = await response.json();
-          const reviewers = (environment.protection_rules ?? []).find((rule) => rule.type === 'required_reviewers');
-          if (!reviewers || !Array.isArray(reviewers.reviewers) || reviewers.reviewers.length === 0) {
-            throw new Error('npm-release must require at least one reviewer');
-          }
-          if (reviewers.prevent_self_review !== true) {
-            throw new Error('npm-release must prevent self-review');
-          }
-          if (environment.deployment_branch_policy?.protected_branches !== true) {
-            throw new Error('npm-release must allow protected branches only');
-          }
-          })().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-control.cjs verify-environment
 
       - name: Verify exact package metadata
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); const v=process.env.INPUT_VERSION; if(p.version!==v||l.version!==v||l.packages[''].version!==v) throw new Error('package/lock/input version drift')"
-          test "$(node --version)" = "v24.20.0"
-          test "$(npm --version)" = "11.19.0"
-
-      - name: Prove version is not already published
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          npm view n8n-nodes-frihet versions --json > "$RUNNER_TEMP/npm-versions.json"
-          node -e "const fs=require('fs'); const versions=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/npm-versions.json','utf8')); if(versions.includes(process.env.INPUT_VERSION)) throw new Error('version already exists on npm')"
+        run: node .github/scripts/release-control.cjs verify-metadata
 
       - name: Install from lockfile
         run: npm ci --no-audit --no-fund
@@ -111,40 +69,25 @@ jobs:
       - name: Audit production dependency surface
         run: npm audit --omit=dev
 
-      - name: Pack and record exact tarball contract
-        run: |
-          npm pack --json --ignore-scripts > "$RUNNER_TEMP/npm-pack.json"
-          node -e "const fs=require('fs'); const pack=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/npm-pack.json','utf8'))[0]; fs.unlinkSync(pack.filename)"
+      - name: Build expected package evidence
+        run: node .github/scripts/release-control.cjs pack-evidence
 
-      - name: Publish with npm trusted publishing and provenance
-        run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain)"
-          npm publish --provenance --access public
+      - name: Reconcile existing npm version or request publish
+        id: registry
+        run: node .github/scripts/release-control.cjs registry-decision
 
-      - name: Read back immutable npm evidence
+      - name: Publish missing npm version with trusted publishing
+        if: steps.registry.outputs.exists == 'false'
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if npm view "n8n-nodes-frihet@$INPUT_VERSION" --json > "$RUNNER_TEMP/npm-readback.json"; then
-              break
-            fi
-            sleep 10
-          done
-          test -s "$RUNNER_TEMP/npm-readback.json"
-          node <<'NODE'
-          const fs = require('fs');
-          const version = process.env.INPUT_VERSION;
-          const readback = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/npm-readback.json`, 'utf8'));
-          const pack = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/npm-pack.json`, 'utf8'))[0];
-          const expectedTarball = `https://registry.npmjs.org/n8n-nodes-frihet/-/n8n-nodes-frihet-${version}.tgz`;
-          if (readback.version !== version) throw new Error('npm version readback mismatch');
-          if (readback.gitHead !== process.env.GITHUB_SHA) throw new Error('npm gitHead does not match dispatched main SHA');
-          if (readback.dist?.integrity !== pack.integrity) throw new Error('npm integrity does not match verified local pack');
-          if (readback.dist?.shasum !== pack.shasum) throw new Error('npm shasum does not match verified local pack');
-          if (readback.dist?.tarball !== expectedTarball) throw new Error('npm tarball URL mismatch');
-          if (readback.dist?.fileCount !== pack.entryCount) throw new Error('npm file-count readback mismatch');
-          if (readback.dist?.unpackedSize !== pack.unpackedSize) throw new Error('npm unpacked-size readback mismatch');
-          NODE
+          node .github/scripts/release-control.cjs verify-dispatch
+          npm publish --provenance --access public
+
+      - name: Reconcile final npm bytes
+        run: node .github/scripts/release-control.cjs reconcile-registry --retry
+
+      - name: Reconcile immutable Git tag and GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-control.cjs reconcile-github-release

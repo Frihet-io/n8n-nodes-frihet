@@ -3,12 +3,12 @@
 All notable changes to `n8n-nodes-frihet` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased] — 1.0.2 release candidate - 2026-08-30
+## [1.0.2] — source release contract - 2026-08-30
 
-`package.json` and `package-lock.json` identify this source as `1.0.2`, but
-that version has **not** been published. The npm registry still serves
-`1.0.1` (`gitHead db1208d67c32a2bd46d734d02ab95fb3e5a0a0d6`) until the
-protected release workflow succeeds and its immutable readback passes.
+`package.json` and `package-lock.json` identify this source as `1.0.2`.
+Publication state is external and must not be inferred from this file: the
+protected release workflow reconciles npm bytes, the immutable Git tag, and
+the GitHub Release against one exact `main` commit.
 
 ### R4 — reproducible package and release control plane
 
@@ -16,15 +16,19 @@ protected release workflow succeeds and its immutable readback passes.
   the lockfile-driven local install contract.
 - Pinned CI actions, added package/lock parity, tracked-dependency, committed
   `dist`, npm pack allowlist, production audit, and Node 20/22 gates.
-- Added a manual-main-only `1.0.2` release workflow. It requires the protected
-  `npm-release` environment, exact repository/main/SHA, a clean tree, a
-  negative npm-version check, OIDC trusted publishing with provenance, and
-  registry readback of `gitHead`, integrity, shasum, tarball URL, file count,
-  and unpacked size. It contains no npm token and has not been dispatched.
+- Added a retry-safe, manual-main-only `1.0.2` release workflow. It requires
+  the protected `npm-release` environment (reviewer, self-review prevention,
+  protected branches, and no administrator bypass), exact repository/main/SHA,
+  a clean tree, and OIDC trusted publishing with provenance. It builds the
+  expected tarball first; a missing npm version is published, while an existing
+  version must match `gitHead`, integrity, shasum, tarball bytes, allowlist,
+  count, and sizes exactly. Only then does it create or verify the immutable
+  `v1.0.2` tag and GitHub Release. It contains no npm token.
 - Added adversarial tests for stale version, wrong repo/ref/SHA, dirty tree,
-  existing npm version, tracked dependencies, source/`dist` drift, and unsafe
-  self-approval, webhook-template claims, and other bypasses. The release
-  candidate runs 82/82 tests.
+  wrong existing npm metadata/bytes, retry-after-publish, wrong tag target,
+  tracked dependencies, source/`dist` drift, weakened workflow structure,
+  environment bypasses, unsafe webhook-template claims, and other bypasses.
+  The release contract runs 93/93 tests.
 - Removed the quarantined webhook templates from the production catalogue.
   They remain test fixtures only and make no HMAC/security promise.
 - Reverified MCP capability truth against `Frihet-io/frihet-mcp` main

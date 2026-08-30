@@ -1,0 +1,501 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+const { execFileSync } = require('child_process');
+
+const PACKAGE_NAME = 'n8n-nodes-frihet';
+const VERSION = '1.0.2';
+const TAG = `v${VERSION}`;
+const REPOSITORY = 'Frihet-io/n8n-nodes-frihet';
+const ENVIRONMENT = 'npm-release';
+const NODE_VERSION = 'v24.20.0';
+const NPM_VERSION = '11.19.0';
+const REGISTRY = 'https://registry.npmjs.org';
+const GITHUB_API = 'https://api.github.com';
+const API_VERSION = '2026-03-10';
+const EVIDENCE_NAME = 'npm-pack-evidence.json';
+const READBACK_NAME = 'npm-readback.json';
+const RELEASE_NAME = `${PACKAGE_NAME} v${VERSION}`;
+const RELEASE_BODY = [
+	`Immutable release for ${PACKAGE_NAME}@${VERSION}.`,
+	'',
+	'The npm tarball, registry metadata, Git tag, and this GitHub Release were reconciled by the protected release workflow against the same main commit.',
+].join('\n');
+
+const EXPECTED_FILES = Object.freeze([
+	'README.md',
+	'dist/credentials/FrihetApi.credentials.d.ts',
+	'dist/credentials/FrihetApi.credentials.js',
+	'dist/nodes/Frihet/Frihet.node.d.ts',
+	'dist/nodes/Frihet/Frihet.node.js',
+	'dist/nodes/Frihet/Frihet.node.json',
+	'dist/nodes/Frihet/GenericFunctions.d.ts',
+	'dist/nodes/Frihet/GenericFunctions.js',
+	'dist/nodes/Frihet/frihet.svg',
+	'package.json',
+]);
+
+function invariant(condition, message) {
+	if (!condition) throw new Error(message);
+}
+
+function sorted(values) {
+	return [...values].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+function sha1(buffer) {
+	return crypto.createHash('sha1').update(buffer).digest('hex');
+}
+
+function integrity(buffer) {
+	return `sha512-${crypto.createHash('sha512').update(buffer).digest('base64')}`;
+}
+
+function parseTarSize(header) {
+	const value = header.toString('utf8').replace(/\0.*$/s, '').trim();
+	return value === '' ? 0 : Number.parseInt(value, 8);
+}
+
+function parseTarFiles(tarball) {
+	const archive = zlib.gunzipSync(tarball);
+	const files = [];
+	let offset = 0;
+
+	while (offset + 512 <= archive.length) {
+		const header = archive.subarray(offset, offset + 512);
+		if (header.every((byte) => byte === 0)) break;
+
+		const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
+		const prefix = header.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '');
+		const fullName = prefix ? `${prefix}/${name}` : name;
+		const size = parseTarSize(header.subarray(124, 136));
+		const type = header.subarray(156, 157).toString('utf8');
+
+		if (type === '' || type === '0') {
+			invariant(fullName.startsWith('package/'), `Unexpected tar entry root: ${fullName}`);
+			files.push({ path: fullName.slice('package/'.length), size });
+		}
+
+		offset += 512 + Math.ceil(size / 512) * 512;
+	}
+
+	return files;
+}
+
+function validateFileContract(files, label) {
+	const paths = sorted(files.map((entry) => entry.path));
+	invariant(
+		JSON.stringify(paths) === JSON.stringify(EXPECTED_FILES),
+		`${label} file allowlist mismatch: ${JSON.stringify(paths)}`,
+	);
+	for (const entry of files) {
+		invariant(Number.isInteger(entry.size) && entry.size >= 0, `${label} has invalid size for ${entry.path}`);
+	}
+}
+
+function buildPackEvidence(pack, tarball, sha) {
+	invariant(pack && typeof pack === 'object', 'npm pack returned no report');
+	invariant(pack.name === PACKAGE_NAME, `Unexpected pack name: ${pack.name}`);
+	invariant(pack.version === VERSION, `Unexpected pack version: ${pack.version}`);
+	invariant(pack.filename === `${PACKAGE_NAME}-${VERSION}.tgz`, `Unexpected tarball filename: ${pack.filename}`);
+	invariant(pack.entryCount === EXPECTED_FILES.length, `Unexpected pack entry count: ${pack.entryCount}`);
+	invariant(pack.files.length === EXPECTED_FILES.length, `Unexpected pack files length: ${pack.files.length}`);
+	validateFileContract(pack.files, 'npm pack report');
+
+	const tarFiles = parseTarFiles(tarball);
+	validateFileContract(tarFiles, 'local tarball');
+	const reportSizes = new Map(pack.files.map((entry) => [entry.path, entry.size]));
+	for (const entry of tarFiles) {
+		invariant(reportSizes.get(entry.path) === entry.size, `Local tar size mismatch for ${entry.path}`);
+	}
+
+	const unpackedSize = pack.files.reduce((total, entry) => total + entry.size, 0);
+	invariant(pack.unpackedSize === unpackedSize, 'npm pack unpackedSize does not equal file-size sum');
+	invariant(pack.size === tarball.length, 'npm pack size does not equal tarball byte length');
+	invariant(pack.shasum === sha1(tarball), 'npm pack shasum does not match tarball bytes');
+	invariant(pack.integrity === integrity(tarball), 'npm pack integrity does not match tarball bytes');
+
+	return {
+		schemaVersion: 1,
+		name: PACKAGE_NAME,
+		version: VERSION,
+		sha,
+		tarballUrl: `${REGISTRY}/${PACKAGE_NAME}/-/${PACKAGE_NAME}-${VERSION}.tgz`,
+		size: pack.size,
+		unpackedSize: pack.unpackedSize,
+		entryCount: pack.entryCount,
+		shasum: pack.shasum,
+		integrity: pack.integrity,
+		files: pack.files
+			.map((entry) => ({ path: entry.path, size: entry.size }))
+			.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0)),
+	};
+}
+
+function validatePublishedPackage(manifest, tarball, evidence, expectedSha) {
+	invariant(manifest && typeof manifest === 'object', 'npm manifest is missing');
+	invariant(evidence.sha === expectedSha, 'Local pack evidence SHA does not match GITHUB_SHA');
+	invariant(manifest.name === PACKAGE_NAME, `Published package name mismatch: ${manifest.name}`);
+	invariant(manifest.version === VERSION, `Published version mismatch: ${manifest.version}`);
+	invariant(manifest.gitHead === expectedSha, `Published gitHead mismatch: ${manifest.gitHead}`);
+	invariant(manifest.dist?.integrity === evidence.integrity, 'Published integrity differs from expected pack');
+	invariant(manifest.dist?.shasum === evidence.shasum, 'Published shasum differs from expected pack');
+	invariant(manifest.dist?.tarball === evidence.tarballUrl, 'Published tarball URL differs from expected pack');
+	invariant(manifest.dist?.fileCount === evidence.entryCount, 'Published file count differs from expected pack');
+	invariant(manifest.dist?.unpackedSize === evidence.unpackedSize, 'Published unpacked size differs from expected pack');
+	invariant(tarball.length === evidence.size, 'Downloaded tarball byte length differs from expected pack');
+	invariant(sha1(tarball) === evidence.shasum, 'Downloaded tarball shasum differs from expected pack');
+	invariant(integrity(tarball) === evidence.integrity, 'Downloaded tarball integrity differs from expected pack');
+
+	const remoteFiles = parseTarFiles(tarball);
+	validateFileContract(remoteFiles, 'downloaded npm tarball');
+	const expectedSizes = new Map(evidence.files.map((entry) => [entry.path, entry.size]));
+	for (const entry of remoteFiles) {
+		invariant(expectedSizes.get(entry.path) === entry.size, `Downloaded tar size mismatch for ${entry.path}`);
+	}
+
+	return {
+		validated: true,
+		name: PACKAGE_NAME,
+		version: VERSION,
+		gitHead: manifest.gitHead,
+		integrity: manifest.dist.integrity,
+		shasum: manifest.dist.shasum,
+		tarball: manifest.dist.tarball,
+		fileCount: manifest.dist.fileCount,
+		unpackedSize: manifest.dist.unpackedSize,
+		size: tarball.length,
+	};
+}
+
+function decideRegistryAction(published, evidence, expectedSha) {
+	if (published === null) return { exists: false, shouldPublish: true, readback: null };
+	const readback = validatePublishedPackage(published.manifest, published.tarball, evidence, expectedSha);
+	return { exists: true, shouldPublish: false, readback };
+}
+
+function validateEnvironmentPolicy(environment) {
+	invariant(environment && typeof environment === 'object', 'GitHub environment response is missing');
+	const reviewers = (environment.protection_rules ?? []).find((rule) => rule.type === 'required_reviewers');
+	invariant(reviewers && Array.isArray(reviewers.reviewers) && reviewers.reviewers.length > 0, 'npm-release must require at least one reviewer');
+	invariant(reviewers.prevent_self_review === true, 'npm-release must prevent self-review');
+	invariant(environment.deployment_branch_policy?.protected_branches === true, 'npm-release must allow protected branches only');
+	invariant(environment.can_admins_bypass === false, 'npm-release must disallow administrator bypass');
+	return true;
+}
+
+function resolveTagTargetFromObjects(refObject, tagObjects) {
+	let object = refObject;
+	for (let depth = 0; depth < 8; depth += 1) {
+		invariant(object && typeof object.sha === 'string', 'Tag object is missing a SHA');
+		if (object.type === 'commit') return object.sha;
+		invariant(object.type === 'tag', `Unsupported tag object type: ${object.type}`);
+		object = tagObjects[object.sha];
+	}
+	throw new Error('Annotated tag chain exceeds maximum depth');
+}
+
+function validateReleaseRecord(release, tagTarget, expectedSha) {
+	invariant(tagTarget === expectedSha, `Tag ${TAG} points to ${tagTarget}, expected ${expectedSha}`);
+	invariant(release && typeof release === 'object', 'GitHub Release is missing');
+	invariant(release.tag_name === TAG, `GitHub Release tag mismatch: ${release.tag_name}`);
+	invariant(release.name === RELEASE_NAME, `GitHub Release name mismatch: ${release.name}`);
+	invariant(release.body === RELEASE_BODY, 'GitHub Release body differs from the immutable release contract');
+	invariant(release.draft === false, 'GitHub Release must not be a draft');
+	invariant(release.prerelease === false, 'GitHub Release must not be a prerelease');
+	return true;
+}
+
+function runnerFile(name) {
+	const directory = process.env.RUNNER_TEMP;
+	invariant(directory, 'RUNNER_TEMP is required');
+	return path.join(directory, name);
+}
+
+function readJson(file) {
+	return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function writeJson(file, value) {
+	fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+}
+
+function git(...args) {
+	return execFileSync('git', args, { encoding: 'utf8' }).trim();
+}
+
+function validateDispatchContext(context) {
+	invariant(context.repository === REPOSITORY, `Unexpected repository: ${context.repository}`);
+	invariant(context.ref === 'refs/heads/main', `Release must run from main, got ${context.ref}`);
+	invariant(context.inputVersion === VERSION, `Release input must be ${VERSION}`);
+	invariant(context.sha === context.head, 'Checked-out HEAD differs from GITHUB_SHA');
+	invariant(context.status === '', 'Release worktree is dirty');
+	invariant(context.trackedNodeModules === '', 'node_modules is tracked');
+	return true;
+}
+
+function assertDispatch() {
+	validateDispatchContext({
+		repository: process.env.GITHUB_REPOSITORY,
+		ref: process.env.GITHUB_REF,
+		inputVersion: process.env.INPUT_VERSION,
+		sha: process.env.GITHUB_SHA,
+		head: git('rev-parse', 'HEAD'),
+		status: git('status', '--porcelain=v1'),
+		trackedNodeModules: git('ls-files', 'node_modules'),
+	});
+}
+
+function validateMetadataContract(metadata) {
+	const { packageJson, packageLock } = metadata;
+	invariant(metadata.inputVersion === VERSION, `Release input must be ${VERSION}`);
+	invariant(packageJson.version === VERSION, 'package.json version mismatch');
+	invariant(packageLock.version === VERSION, 'package-lock root version mismatch');
+	invariant(packageLock.packages?.['']?.version === VERSION, 'package-lock package version mismatch');
+	invariant(metadata.nodeVersion === NODE_VERSION, `Release Node must be ${NODE_VERSION}, got ${metadata.nodeVersion}`);
+	invariant(metadata.npmVersion === NPM_VERSION, `Release npm must be ${NPM_VERSION}, got ${metadata.npmVersion}`);
+	return true;
+}
+
+function assertMetadata() {
+	const npmVersion = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+	validateMetadataContract({
+		inputVersion: process.env.INPUT_VERSION,
+		packageJson: readJson('package.json'),
+		packageLock: readJson('package-lock.json'),
+		nodeVersion: process.version,
+		npmVersion,
+	});
+}
+
+async function request(url, options = {}) {
+	const response = await fetch(url, {
+		...options,
+		headers: {
+			Accept: 'application/vnd.github+json',
+			'Cache-Control': 'no-cache',
+			...(options.headers ?? {}),
+		},
+	});
+	return response;
+}
+
+async function responseJson(response, label) {
+	const text = await response.text();
+	if (!response.ok) throw new Error(`${label} failed (${response.status}): ${text.slice(0, 500)}`);
+	return JSON.parse(text);
+}
+
+async function verifyEnvironment() {
+	const token = process.env.GITHUB_TOKEN;
+	invariant(token, 'GITHUB_TOKEN is required');
+	const response = await request(`${GITHUB_API}/repos/${REPOSITORY}/environments/${ENVIRONMENT}`, {
+		headers: {
+			Authorization: `Bearer ${token}`,
+			'X-GitHub-Api-Version': API_VERSION,
+		},
+	});
+	const environment = await responseJson(response, 'Environment readback');
+	validateEnvironmentPolicy(environment);
+}
+
+function createPackEvidence() {
+	const output = execFileSync('npm', ['pack', '--json', '--ignore-scripts'], { encoding: 'utf8' });
+	const pack = JSON.parse(output)[0];
+	const tarballPath = path.resolve(pack.filename);
+	try {
+		const tarball = fs.readFileSync(tarballPath);
+		const evidence = buildPackEvidence(pack, tarball, process.env.GITHUB_SHA);
+		writeJson(runnerFile(EVIDENCE_NAME), evidence);
+		return evidence;
+	} finally {
+		if (fs.existsSync(tarballPath)) fs.unlinkSync(tarballPath);
+	}
+}
+
+async function fetchPublishedPackage() {
+	const manifestResponse = await request(`${REGISTRY}/${PACKAGE_NAME}/${VERSION}`, {
+		headers: { Accept: 'application/json' },
+	});
+	if (manifestResponse.status === 404) return null;
+	const manifest = await responseJson(manifestResponse, 'npm manifest readback');
+	const tarballResponse = await request(manifest.dist?.tarball, { headers: { Accept: 'application/octet-stream' } });
+	if (!tarballResponse.ok) throw new Error(`npm tarball readback failed (${tarballResponse.status})`);
+	return { manifest, tarball: Buffer.from(await tarballResponse.arrayBuffer()) };
+}
+
+function appendOutput(name, value) {
+	invariant(process.env.GITHUB_OUTPUT, 'GITHUB_OUTPUT is required');
+	fs.appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
+}
+
+async function registryDecision() {
+	const evidence = readJson(runnerFile(EVIDENCE_NAME));
+	const published = await fetchPublishedPackage();
+	const decision = decideRegistryAction(published, evidence, process.env.GITHUB_SHA);
+	if (decision.readback) writeJson(runnerFile(READBACK_NAME), decision.readback);
+	appendOutput('exists', decision.exists ? 'true' : 'false');
+	return decision;
+}
+
+async function reconcileRegistry(retry) {
+	const evidence = readJson(runnerFile(EVIDENCE_NAME));
+	const attempts = retry ? 12 : 1;
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		const published = await fetchPublishedPackage();
+		if (published) {
+			const readback = validatePublishedPackage(published.manifest, published.tarball, evidence, process.env.GITHUB_SHA);
+			writeJson(runnerFile(READBACK_NAME), readback);
+			return readback;
+		}
+		if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 10_000));
+	}
+	throw new Error(`${PACKAGE_NAME}@${VERSION} did not become readable from npm`);
+}
+
+function githubHeaders() {
+	const token = process.env.GITHUB_TOKEN;
+	invariant(token, 'GITHUB_TOKEN is required');
+	return {
+		Authorization: `Bearer ${token}`,
+		'X-GitHub-Api-Version': API_VERSION,
+		'Content-Type': 'application/json',
+	};
+}
+
+async function githubJson(method, pathname, body, allowedStatuses = [200]) {
+	const response = await request(`${GITHUB_API}/repos/${REPOSITORY}${pathname}`, {
+		method,
+		headers: githubHeaders(),
+		body: body === undefined ? undefined : JSON.stringify(body),
+	});
+	if (allowedStatuses.includes(response.status)) {
+		return { status: response.status, data: response.status === 204 ? null : JSON.parse(await response.text()) };
+	}
+	const text = await response.text();
+	throw new Error(`GitHub ${method} ${pathname} failed (${response.status}): ${text.slice(0, 500)}`);
+}
+
+async function readTagTarget() {
+	const ref = await githubJson('GET', `/git/ref/tags/${encodeURIComponent(TAG)}`, undefined, [200, 404]);
+	if (ref.status === 404) return null;
+	let object = ref.data.object;
+	for (let depth = 0; depth < 8; depth += 1) {
+		if (object.type === 'commit') return object.sha;
+		invariant(object.type === 'tag', `Unsupported Git tag object type: ${object.type}`);
+		const annotated = await githubJson('GET', `/git/tags/${object.sha}`);
+		object = annotated.data.object;
+	}
+	throw new Error('Annotated tag chain exceeds maximum depth');
+}
+
+async function ensureTag(expectedSha) {
+	let target = await readTagTarget();
+	if (target === null) {
+		try {
+			await githubJson('POST', '/git/refs', { ref: `refs/tags/${TAG}`, sha: expectedSha }, [201]);
+		} catch (error) {
+			// A concurrent retry may have created the immutable tag. Verify it below.
+			if (!String(error.message).includes('(422)')) throw error;
+		}
+		target = await readTagTarget();
+	}
+	invariant(target === expectedSha, `Tag ${TAG} points to ${target}, expected ${expectedSha}`);
+	return target;
+}
+
+async function readRelease() {
+	const release = await githubJson('GET', `/releases/tags/${encodeURIComponent(TAG)}`, undefined, [200, 404]);
+	return release.status === 404 ? null : release.data;
+}
+
+async function ensureRelease(expectedSha) {
+	const target = await ensureTag(expectedSha);
+	let release = await readRelease();
+	if (release === null) {
+		try {
+			await githubJson('POST', '/releases', {
+				tag_name: TAG,
+				target_commitish: expectedSha,
+				name: RELEASE_NAME,
+				body: RELEASE_BODY,
+				draft: false,
+				prerelease: false,
+				generate_release_notes: false,
+			}, [201]);
+		} catch (error) {
+			// A concurrent retry may have created the immutable release. Verify it below.
+			if (!String(error.message).includes('(422)')) throw error;
+		}
+		release = await readRelease();
+	}
+	validateReleaseRecord(release, target, expectedSha);
+	return release;
+}
+
+async function reconcileGitHubRelease() {
+	const readback = readJson(runnerFile(READBACK_NAME));
+	invariant(readback.validated === true, 'Validated npm readback is required before GitHub release');
+	invariant(readback.gitHead === process.env.GITHUB_SHA, 'Validated npm gitHead differs from GITHUB_SHA');
+	return ensureRelease(process.env.GITHUB_SHA);
+}
+
+async function main() {
+	const [command, ...args] = process.argv.slice(2);
+	switch (command) {
+		case 'verify-dispatch':
+			assertDispatch();
+			break;
+		case 'verify-environment':
+			await verifyEnvironment();
+			break;
+		case 'verify-metadata':
+			assertMetadata();
+			break;
+		case 'pack-evidence':
+			createPackEvidence();
+			break;
+		case 'registry-decision':
+			await registryDecision();
+			break;
+		case 'reconcile-registry':
+			await reconcileRegistry(args.includes('--retry'));
+			break;
+		case 'reconcile-github-release':
+			await reconcileGitHubRelease();
+			break;
+		default:
+			throw new Error(`Unknown release-control command: ${command ?? '<missing>'}`);
+	}
+}
+
+module.exports = {
+	EXPECTED_FILES,
+	PACKAGE_NAME,
+	RELEASE_BODY,
+	RELEASE_NAME,
+	TAG,
+	VERSION,
+	buildPackEvidence,
+	decideRegistryAction,
+	parseTarFiles,
+	resolveTagTargetFromObjects,
+	validateDispatchContext,
+	validateEnvironmentPolicy,
+	validateFileContract,
+	validateMetadataContract,
+	validatePublishedPackage,
+	validateReleaseRecord,
+};
+
+if (require.main === module) {
+	main().catch((error) => {
+		console.error(error);
+		process.exit(1);
+	});
+}

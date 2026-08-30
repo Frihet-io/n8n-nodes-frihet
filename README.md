@@ -4,9 +4,10 @@ n8n community node for [Frihet](https://frihet.io) — AI-native business manage
 
 Create invoices, manage expenses, sync clients, and automate your business workflows from n8n.
 
-> **Release status:** this branch prepares `1.0.2`; it is not evidence of an
-> npm publication. The registry version remains `1.0.1` until the protected,
-> manually dispatched OIDC release workflow completes and its readback passes.
+> **Release status:** this source declares `1.0.2`; a source checkout is not
+> evidence of npm or GitHub release state. The protected, manually dispatched
+> workflow either publishes a missing version or verifies an existing version
+> byte-for-byte before reconciling its immutable tag and GitHub Release.
 
 ## Installation
 

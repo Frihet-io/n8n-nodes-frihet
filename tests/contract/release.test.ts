@@ -1,85 +1,341 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { parse } from 'yaml';
 
 const ROOT = path.resolve(__dirname, '../..');
 const RELEASE_WORKFLOW = path.join(ROOT, '.github/workflows/release.yml');
+const control = require('../../.github/scripts/release-control.cjs');
 
-const REQUIRED_RELEASE_GUARDS = [
-	'workflow_dispatch:',
-	'default: 1.0.2',
-	'environment: npm-release',
-	'contents: read',
-	'id-token: write',
-	'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
-	'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
-	'node-version: 24.20.0',
-	"'X-GitHub-Api-Version': '2026-03-10'",
-	'test "$GITHUB_REPOSITORY" = "Frihet-io/n8n-nodes-frihet"',
-	'test "$GITHUB_REF" = "refs/heads/main"',
-	'test "$INPUT_VERSION" = "1.0.2"',
-	'test "$GITHUB_SHA" = "$(git rev-parse HEAD)"',
-	'git ls-remote origin refs/heads/main',
-	'test -z "$(git status --porcelain=v1)"',
-	'git ls-files node_modules',
-	"environment.protection_rules",
-	"rule.type === 'required_reviewers'",
-	'reviewers.prevent_self_review !== true',
-	'protected_branches !== true',
-	"l.packages[''].version",
-	'npm view n8n-nodes-frihet versions --json',
-	'npm ci --no-audit --no-fund',
-	'npm run build',
-	'git diff --exit-code -- dist',
-	'npm run test:ci',
-	'npm audit --omit=dev',
-	'npm pack --json --ignore-scripts',
-	'fs.unlinkSync(pack.filename)',
-	'npm publish --provenance --access public',
-	'readback.gitHead !== process.env.GITHUB_SHA',
-	'readback.dist?.integrity !== pack.integrity',
-	'readback.dist?.tarball !== expectedTarball',
+type JsonObject = Record<string, any>;
+
+const EXPECTED_STEP_NAMES = [
+	'Check out exact dispatch revision',
+	'Use release runtime',
+	'Verify dispatch provenance',
+	'Verify protected release environment',
+	'Verify exact package metadata',
+	'Install from lockfile',
+	'Build exact committed artifacts',
+	'Run contract and release-policy tests',
+	'Audit production dependency surface',
+	'Build expected package evidence',
+	'Reconcile existing npm version or request publish',
+	'Publish missing npm version with trusted publishing',
+	'Reconcile final npm bytes',
+	'Reconcile immutable Git tag and GitHub Release',
 ];
 
-function validateReleaseWorkflow(source: string): void {
-	for (const guard of REQUIRED_RELEASE_GUARDS) {
-		if (!source.includes(guard)) throw new Error(`Missing release guard: ${guard}`);
+const EXPECTED_RUNS: Record<string, string> = {
+	'Verify dispatch provenance': 'node .github/scripts/release-control.cjs verify-dispatch',
+	'Verify protected release environment': 'node .github/scripts/release-control.cjs verify-environment',
+	'Verify exact package metadata': 'node .github/scripts/release-control.cjs verify-metadata',
+	'Install from lockfile': 'npm ci --no-audit --no-fund',
+	'Build exact committed artifacts': [
+		'npm run build',
+		'git diff --exit-code -- dist',
+		'test -z "$(git status --porcelain --untracked-files=no)"',
+	].join('\n'),
+	'Run contract and release-policy tests': 'npm run test:ci',
+	'Audit production dependency surface': 'npm audit --omit=dev',
+	'Build expected package evidence': 'node .github/scripts/release-control.cjs pack-evidence',
+	'Reconcile existing npm version or request publish': 'node .github/scripts/release-control.cjs registry-decision',
+	'Publish missing npm version with trusted publishing': [
+		'node .github/scripts/release-control.cjs verify-dispatch',
+		'npm publish --provenance --access public',
+	].join('\n'),
+	'Reconcile final npm bytes': 'node .github/scripts/release-control.cjs reconcile-registry --retry',
+	'Reconcile immutable Git tag and GitHub Release': 'node .github/scripts/release-control.cjs reconcile-github-release',
+};
+
+function clone<T>(value: T): T {
+	return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function parseWorkflow(): JsonObject {
+	return parse(fs.readFileSync(RELEASE_WORKFLOW, 'utf8')) as JsonObject;
+}
+
+function stepByName(workflow: JsonObject, name: string): JsonObject {
+	const step = workflow.jobs.publish.steps.find((candidate: JsonObject) => candidate.name === name);
+	if (!step) throw new Error(`Missing release step: ${name}`);
+	return step;
+}
+
+function validateReleaseWorkflow(workflow: JsonObject): void {
+	const dispatch = workflow.on?.workflow_dispatch;
+	if (!dispatch || dispatch.inputs?.version?.default !== '1.0.2') {
+		throw new Error('workflow_dispatch must require exact version 1.0.2');
 	}
-	if (/NPM_TOKEN|NODE_AUTH_TOKEN/.test(source)) {
-		throw new Error('Release workflow must use OIDC, never a long-lived npm token');
+	if (dispatch.inputs.version.required !== true || dispatch.inputs.version.type !== 'string') {
+		throw new Error('workflow_dispatch version input is not a required string');
 	}
-	if (/^\s+(?:contents|actions|packages|deployments): write$/m.test(source)) {
-		throw new Error('Release workflow permissions exceed contents:read + id-token:write');
+
+	const expectedPermissions = { actions: 'read', contents: 'write', 'id-token': 'write' };
+	if (JSON.stringify(workflow.permissions) !== JSON.stringify(expectedPermissions)) {
+		throw new Error('Release permissions must be exactly actions:read, contents:write, id-token:write');
 	}
-	for (const uses of source.matchAll(/^\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/gm)) {
-		if (!/@[0-9a-f]{40}$/.test(uses[1])) throw new Error(`Unpinned action: ${uses[1]}`);
+
+	const job = workflow.jobs?.publish;
+	if (!job || Object.keys(workflow.jobs).length !== 1) throw new Error('Release must have one publish job');
+	if (job.environment !== 'npm-release') throw new Error('Release job must use npm-release environment');
+	if (job['runs-on'] !== 'ubuntu-latest' || job['timeout-minutes'] !== 20) {
+		throw new Error('Release runner contract changed');
+	}
+	if (workflow.concurrency?.group !== 'npm-release' || workflow.concurrency?.['cancel-in-progress'] !== false) {
+		throw new Error('Release concurrency contract changed');
+	}
+
+	const stepNames = job.steps.map((step: JsonObject) => step.name);
+	if (JSON.stringify(stepNames) !== JSON.stringify(EXPECTED_STEP_NAMES)) {
+		throw new Error(`Release step order changed: ${JSON.stringify(stepNames)}`);
+	}
+
+	const checkout = stepByName(workflow, 'Check out exact dispatch revision');
+	if (checkout.uses !== 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803') {
+		throw new Error('Checkout action is not pinned to the reviewed SHA');
+	}
+	if (
+		checkout.with?.ref !== '${{ github.sha }}' ||
+		checkout.with?.['fetch-depth'] !== 0 ||
+		checkout.with?.['persist-credentials'] !== false
+	) {
+		throw new Error('Checkout must use the exact dispatch SHA without persisted credentials');
+	}
+
+	const setup = stepByName(workflow, 'Use release runtime');
+	if (setup.uses !== 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38') {
+		throw new Error('setup-node action is not pinned to the reviewed SHA');
+	}
+	if (
+		setup.with?.['node-version'] !== '24.20.0' ||
+		setup.with?.['registry-url'] !== 'https://registry.npmjs.org' ||
+		setup.with?.['package-manager-cache'] !== false
+	) {
+		throw new Error('Release runtime contract changed');
+	}
+
+	for (const step of job.steps) {
+		if (step.uses && !/^[^@]+@[0-9a-f]{40}$/.test(step.uses)) {
+			throw new Error(`Unpinned action: ${step.uses}`);
+		}
+		if (EXPECTED_RUNS[step.name] !== undefined && String(step.run).trim() !== EXPECTED_RUNS[step.name]) {
+			throw new Error(`Release run step was defanged: ${step.name}`);
+		}
+	}
+
+	const environment = stepByName(workflow, 'Verify protected release environment');
+	const registry = stepByName(workflow, 'Reconcile existing npm version or request publish');
+	const publish = stepByName(workflow, 'Publish missing npm version with trusted publishing');
+	const githubRelease = stepByName(workflow, 'Reconcile immutable Git tag and GitHub Release');
+	if (environment.env?.GITHUB_TOKEN !== '${{ github.token }}') throw new Error('Environment readback lacks GitHub token');
+	if (registry.id !== 'registry') throw new Error('Registry decision step must expose the registry id');
+	if (publish.if !== "steps.registry.outputs.exists == 'false'") throw new Error('Publish condition is not fail-closed');
+	if (githubRelease.env?.GITHUB_TOKEN !== '${{ github.token }}') throw new Error('GitHub reconciliation lacks GitHub token');
+	if (/NPM_TOKEN|NODE_AUTH_TOKEN/.test(JSON.stringify(workflow))) {
+		throw new Error('Release must use OIDC, never a long-lived npm token');
 	}
 }
 
 describe('npm release control plane', () => {
-	const workflow = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
+	const workflow = parseWorkflow();
+	let pack: JsonObject;
+	let tarball: Buffer;
+	let evidence: JsonObject;
+	let manifest: JsonObject;
+	let npmCache: string;
+	const expectedSha = '0123456789abcdef0123456789abcdef01234567';
 
-	it('pins every fail-closed release guard and uses no npm token', () => {
+	beforeAll(() => {
+		npmCache = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-frihet-release-test-'));
+		const report = JSON.parse(
+			execFileSync('npm', ['pack', '--json', '--ignore-scripts'], {
+				cwd: ROOT,
+				encoding: 'utf8',
+				env: { ...process.env, npm_config_cache: npmCache },
+			}),
+		)[0];
+		pack = report;
+		const filename = path.join(ROOT, report.filename);
+		try {
+			tarball = fs.readFileSync(filename);
+			evidence = control.buildPackEvidence(report, tarball, expectedSha);
+		} finally {
+			if (fs.existsSync(filename)) fs.unlinkSync(filename);
+		}
+		manifest = {
+			name: control.PACKAGE_NAME,
+			version: control.VERSION,
+			gitHead: expectedSha,
+			dist: {
+				integrity: evidence.integrity,
+				shasum: evidence.shasum,
+				tarball: evidence.tarballUrl,
+				fileCount: evidence.entryCount,
+				unpackedSize: evidence.unpackedSize,
+			},
+		};
+	});
+
+	afterAll(() => {
+		if (npmCache) fs.rmSync(npmCache, { recursive: true, force: true });
+	});
+
+	it('parses and structurally pins the exact release graph', () => {
 		expect(() => validateReleaseWorkflow(workflow)).not.toThrow();
 	});
 
-	it.each([
-		['stale version', 'default: 1.0.2', 'default: 1.0.3'],
-		['non-main dispatch', 'test "$GITHUB_REF" = "refs/heads/main"', 'test -n "$GITHUB_REF"'],
-		['wrong repository', 'Frihet-io/n8n-nodes-frihet', 'someone/fork'],
-		['wrong SHA', 'test "$GITHUB_SHA" = "$(git rev-parse HEAD)"', 'git rev-parse HEAD'],
-		['dirty tree', 'test -z "$(git status --porcelain=v1)"', 'git status --short'],
-		['existing npm version', 'npm view n8n-nodes-frihet versions --json', 'echo []'],
-		['tracked dependencies', 'git ls-files node_modules', 'echo node_modules'],
-		['source/dist drift', 'git diff --exit-code -- dist', 'git diff --stat -- dist'],
-		['self approval', 'reviewers.prevent_self_review !== true', 'reviewers.prevent_self_review === true'],
-	])('rejects the %s mutant', (_name, needle, replacement) => {
-		const mutant = workflow.replace(needle, replacement);
-		expect(mutant).not.toBe(workflow);
-		expect(() => validateReleaseWorkflow(mutant)).toThrow();
+	it('rejects a defanged publish step even when dead text contains the real command', () => {
+		const mutant = clone(workflow);
+		const publish = stepByName(mutant, 'Publish missing npm version with trusted publishing');
+		publish.run = 'echo "publish intentionally disabled"';
+		publish.dead_text = EXPECTED_RUNS[publish.name];
+		expect(() => validateReleaseWorkflow(mutant)).toThrow('defanged');
 	});
 
-	it('keeps package and lock metadata on the exact unpublished candidate version', () => {
+	it('rejects missing actions permission', () => {
+		const mutant = clone(workflow);
+		delete mutant.permissions.actions;
+		expect(() => validateReleaseWorkflow(mutant)).toThrow('permissions');
+	});
+
+	it('rejects a stale dispatch version structurally', () => {
+		const mutant = clone(workflow);
+		mutant.on.workflow_dispatch.inputs.version.default = '1.0.1';
+		expect(() => validateReleaseWorkflow(mutant)).toThrow('exact version');
+	});
+
+	it('rejects a defanged source/dist drift guard even when dead text preserves it', () => {
+		const mutant = clone(workflow);
+		const build = stepByName(mutant, 'Build exact committed artifacts');
+		build.run = 'npm run build';
+		build.dead_text = EXPECTED_RUNS[build.name];
+		expect(() => validateReleaseWorkflow(mutant)).toThrow('defanged');
+	});
+
+	it('rejects a publish step that can run after a matching registry readback', () => {
+		const mutant = clone(workflow);
+		stepByName(mutant, 'Publish missing npm version with trusted publishing').if = 'always()';
+		expect(() => validateReleaseWorkflow(mutant)).toThrow('condition');
+	});
+
+	it('requires reviewer approval, self-review prevention, protected branches, and no admin bypass', () => {
+		const environment = {
+			protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', id: 1 }], prevent_self_review: true }],
+			deployment_branch_policy: { protected_branches: true },
+			can_admins_bypass: false,
+		};
+		expect(() => control.validateEnvironmentPolicy(environment)).not.toThrow();
+		const mutant = clone(environment);
+		mutant.can_admins_bypass = true;
+		expect(() => control.validateEnvironmentPolicy(mutant)).toThrow('administrator bypass');
+	});
+
+	it.each([
+		['stale version', { inputVersion: '1.0.1' }],
+		['wrong repository', { repository: 'someone/fork' }],
+		['non-main ref', { ref: 'refs/heads/release' }],
+		['wrong checked-out SHA', { head: 'f'.repeat(40) }],
+		['dirty tree', { status: ' M package.json' }],
+		['tracked node_modules', { trackedNodeModules: 'node_modules/yaml/index.js' }],
+	])('hard-fails dispatch provenance with %s', (_name, mutation) => {
+		const valid = {
+			repository: 'Frihet-io/n8n-nodes-frihet',
+			ref: 'refs/heads/main',
+			inputVersion: '1.0.2',
+			sha: expectedSha,
+			head: expectedSha,
+			status: '',
+			trackedNodeModules: '',
+		};
+		expect(() => control.validateDispatchContext({ ...valid, ...mutation })).toThrow();
+	});
+
+	it('keeps the original main dispatch SHA retryable after the mutable branch tip advances', () => {
+		expect(() => control.validateDispatchContext({
+			repository: 'Frihet-io/n8n-nodes-frihet',
+			ref: 'refs/heads/main',
+			inputVersion: '1.0.2',
+			sha: expectedSha,
+			head: expectedSha,
+			status: '',
+			trackedNodeModules: '',
+		})).not.toThrow();
+	});
+
+	it('pins input, package, lock, Node, and npm versions together', () => {
+		const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+		const packageLock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+		const valid = {
+			inputVersion: '1.0.2',
+			packageJson,
+			packageLock,
+			nodeVersion: 'v24.20.0',
+			npmVersion: '11.19.0',
+		};
+		expect(() => control.validateMetadataContract(valid)).not.toThrow();
+		const mutant = clone(valid);
+		mutant.packageLock.packages[''].version = '1.0.1';
+		expect(() => control.validateMetadataContract(mutant)).toThrow('package-lock package');
+	});
+
+	it('builds exact local evidence for the 10-file runtime package', () => {
+		expect(pack.entryCount).toBe(10);
+		expect(evidence.files.map((entry: JsonObject) => entry.path)).toEqual(control.EXPECTED_FILES);
+		expect(evidence.size).toBe(tarball.length);
+		expect(evidence.sha).toBe(expectedSha);
+	});
+
+	it('retries safely after publish by accepting only byte-identical existing npm state', () => {
+		expect(control.decideRegistryAction(null, evidence, expectedSha)).toEqual({
+			exists: false,
+			shouldPublish: true,
+			readback: null,
+		});
+		const retry = control.decideRegistryAction({ manifest, tarball }, evidence, expectedSha);
+		expect(retry.exists).toBe(true);
+		expect(retry.shouldPublish).toBe(false);
+		expect(retry.readback.validated).toBe(true);
+	});
+
+	it.each([
+		['gitHead', (mutant: JsonObject) => { mutant.gitHead = 'f'.repeat(40); }],
+		['integrity', (mutant: JsonObject) => { mutant.dist.integrity = 'sha512-wrong'; }],
+		['shasum', (mutant: JsonObject) => { mutant.dist.shasum = '0'.repeat(40); }],
+	])('hard-fails an existing npm version with wrong %s', (_field, mutate) => {
+		const mutant = clone(manifest);
+		mutate(mutant);
+		expect(() => control.decideRegistryAction({ manifest: mutant, tarball }, evidence, expectedSha)).toThrow();
+	});
+
+	it('hard-fails downloaded npm bytes that differ from the expected pack', () => {
+		const mutant = Buffer.from(tarball);
+		mutant[mutant.length - 1] ^= 1;
+		expect(() => control.decideRegistryAction({ manifest, tarball: mutant }, evidence, expectedSha)).toThrow();
+	});
+
+	it('resolves annotated tags and rejects a tag pointing at the wrong main SHA', () => {
+		const annotated = {
+			object: { type: 'tag', sha: 'a'.repeat(40) },
+			objects: {
+				['a'.repeat(40)]: { type: 'commit', sha: expectedSha },
+			},
+		};
+		const target = control.resolveTagTargetFromObjects(annotated.object, annotated.objects);
+		expect(target).toBe(expectedSha);
+		const release = {
+			tag_name: control.TAG,
+			name: control.RELEASE_NAME,
+			body: control.RELEASE_BODY,
+			draft: false,
+			prerelease: false,
+		};
+		expect(() => control.validateReleaseRecord(release, target, expectedSha)).not.toThrow();
+		expect(() => control.validateReleaseRecord(release, 'b'.repeat(40), expectedSha)).toThrow('points to');
+	});
+
+	it('keeps package and lock metadata on exact version 1.0.2', () => {
 		const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 		const packageLock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
 		expect(packageJson.version).toBe('1.0.2');
@@ -90,29 +346,5 @@ describe('npm release control plane', () => {
 	it('tracks no dependency installation', () => {
 		const tracked = execFileSync('git', ['ls-files', 'node_modules'], { cwd: ROOT, encoding: 'utf8' });
 		expect(tracked).toBe('');
-	});
-
-	it('packs only the n8n runtime contract', () => {
-		const report = JSON.parse(
-			execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
-				cwd: ROOT,
-				encoding: 'utf8',
-			}),
-		)[0];
-		const files = report.files.map((entry: { path: string }) => entry.path).sort();
-		expect(report.name).toBe('n8n-nodes-frihet');
-		expect(report.version).toBe('1.0.2');
-		expect(files).toEqual([
-			'README.md',
-			'dist/credentials/FrihetApi.credentials.d.ts',
-			'dist/credentials/FrihetApi.credentials.js',
-			'dist/nodes/Frihet/Frihet.node.d.ts',
-			'dist/nodes/Frihet/Frihet.node.js',
-			'dist/nodes/Frihet/Frihet.node.json',
-			'dist/nodes/Frihet/GenericFunctions.d.ts',
-			'dist/nodes/Frihet/GenericFunctions.js',
-			'dist/nodes/Frihet/frihet.svg',
-			'package.json',
-		]);
 	});
 });
