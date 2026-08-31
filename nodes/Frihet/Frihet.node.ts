@@ -6,7 +6,7 @@ import {
 	IDataObject,
 	NodeOperationError,
 } from 'n8n-workflow';
-import { frihetApiRequest, frihetApiRequestAllItems } from './GenericFunctions';
+import { frihetApiRequest } from './GenericFunctions';
 
 /**
  * Fields that the n8n node UI exposes (or templates pass via
@@ -461,8 +461,8 @@ export class Frihet implements INodeType {
 				description: 'Max number of results to return',
 			},
 			{
-				displayName: 'Cursor (After)',
-				name: 'after',
+				displayName: 'Cursor',
+				name: 'cursor',
 				type: 'string',
 				default: '',
 				displayOptions: {
@@ -1559,7 +1559,7 @@ export class Frihet implements INodeType {
 						}
 					} else {
 						const limit = this.getNodeParameter('limit', i) as number;
-						const cursor = this.getNodeParameter('after', i, '') as string;
+						const cursor = this.getNodeParameter('cursor', i, '') as string;
 
 						const pageQs: Record<string, any> = { ...qs, limit };
 						if (cursor) pageQs.cursor = cursor;

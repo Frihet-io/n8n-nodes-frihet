@@ -247,7 +247,7 @@ describe('Frihet node — contract vs Frihet ERP publicApi d5f3f3cd', () => {
 					operation: 'list',
 					returnAll: false,
 					limit: 25,
-					after: realCursor,
+					cursor: realCursor,
 					filters: {},
 				},
 				responseFor: () => ({
