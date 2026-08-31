@@ -1,0 +1,93 @@
+name: Release npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version already committed in package.json
+        required: true
+        default: 1.0.2
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+  id-token: write
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Reconcile immutable npm and GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-release
+    steps:
+      - name: Check out exact dispatch revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use release runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.20.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Verify dispatch provenance
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'
+
+      - name: Verify protected release environment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-control.cjs verify-environment | grep -Fx 'release-control:verify-environment:ok'
+
+      - name: Verify exact package metadata
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: node .github/scripts/release-control.cjs verify-metadata | grep -Fx 'release-control:verify-metadata:ok'
+
+      - name: Install from lockfile
+        run: npm ci --no-audit --no-fund
+
+      - name: Build exact committed artifacts
+        run: |
+          npm run build
+          git diff --exit-code -- dist
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+      - name: Run contract and release-policy tests
+        run: npm run test:ci
+
+      - name: Audit production dependency surface
+        run: npm audit --omit=dev
+
+      - name: Build expected package evidence
+        run: node .github/scripts/release-control.cjs pack-evidence | grep -Fx 'release-control:pack-evidence:ok'
+
+      - name: Reconcile existing npm version or request publish
+        id: registry
+        run: node .github/scripts/release-control.cjs registry-decision | grep -Fx 'release-control:registry-decision:ok'
+
+      - name: Publish missing npm version with trusted publishing
+        if: steps.registry.outputs.exists == 'false'
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'
+          npm publish --provenance --access public
+
+      - name: Reconcile final npm bytes
+        run: node .github/scripts/release-control.cjs reconcile-registry --retry | grep -Fx 'release-control:reconcile-registry:ok'
+
+      - name: Reconcile immutable Git tag and GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-control.cjs reconcile-github-release | grep -Fx 'release-control:reconcile-github-release:ok'

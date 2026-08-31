@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-frihet",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "n8n community node for Frihet ERP — AI-native business management",
   "keywords": [
     "n8n-community-node-package",
@@ -35,17 +35,21 @@
   },
   "scripts": {
     "build": "tsc && cp nodes/Frihet/frihet.svg dist/nodes/Frihet/ && cp nodes/Frihet/Frihet.node.json dist/nodes/Frihet/",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build && npm run test:ci",
     "dev": "tsc -w",
     "test": "jest",
     "test:ci": "jest --ci --runInBand"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "@types/jest": "30.0.0",
     "jest": "30.4.2",
     "n8n-workflow": "^1.0.0",
     "ts-jest": "29.4.11",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "yaml": "2.9.0"
   },
   "peerDependencies": {
     "n8n-workflow": "*"
