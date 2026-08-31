@@ -443,8 +443,8 @@ class Frihet {
                     description: 'Max number of results to return',
                 },
                 {
-                    displayName: 'Cursor (After)',
-                    name: 'after',
+                    displayName: 'Cursor',
+                    name: 'cursor',
                     type: 'string',
                     default: '',
                     displayOptions: {
@@ -1515,7 +1515,7 @@ class Frihet {
                     }
                     else {
                         const limit = this.getNodeParameter('limit', i);
-                        const cursor = this.getNodeParameter('after', i, '');
+                        const cursor = this.getNodeParameter('cursor', i, '');
                         const pageQs = { ...qs, limit };
                         if (cursor)
                             pageQs.cursor = cursor;

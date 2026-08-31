@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.frihetApiRequest = frihetApiRequest;
-exports.frihetApiRequestAllItems = frihetApiRequestAllItems;
 const n8n_workflow_1 = require("n8n-workflow");
 /**
  * Make an authenticated request to the Frihet REST API.
@@ -39,18 +38,4 @@ async function frihetApiRequest(method, endpoint, body, qs) {
             message: `Frihet API error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`,
         });
     }
-}
-/**
- * Make a paginated list request, following cursor-based pagination.
- * Returns all items if returnAll is true, otherwise returns one page.
- */
-async function frihetApiRequestAllItems(endpoint, qs = {}, limit, after) {
-    const params = { ...qs };
-    if (limit)
-        params.limit = limit;
-    if (after)
-        params.after = after;
-    const response = await frihetApiRequest.call(this, 'GET', endpoint, undefined, params);
-    // Frihet API returns { data: [...], meta: { nextCursor, hasMore, ... } }
-    return response?.data ?? response ?? [];
 }

@@ -52,24 +52,3 @@ export async function frihetApiRequest(
 		});
 	}
 }
-
-/**
- * Make a paginated list request, following cursor-based pagination.
- * Returns all items if returnAll is true, otherwise returns one page.
- */
-export async function frihetApiRequestAllItems(
-	this: IExecuteFunctions,
-	endpoint: string,
-	qs: Record<string, any> = {},
-	limit?: number,
-	after?: string,
-): Promise<any[]> {
-	const params: Record<string, any> = { ...qs };
-	if (limit) params.limit = limit;
-	if (after) params.after = after;
-
-	const response = await frihetApiRequest.call(this, 'GET', endpoint, undefined, params);
-
-	// Frihet API returns { data: [...], meta: { nextCursor, hasMore, ... } }
-	return response?.data ?? response ?? [];
-}
