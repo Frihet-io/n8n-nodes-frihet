@@ -35,15 +35,17 @@
   },
   "scripts": {
     "build": "tsc && cp nodes/Frihet/frihet.svg dist/nodes/Frihet/ && cp nodes/Frihet/Frihet.node.json dist/nodes/Frihet/",
-    "prepublishOnly": "npm run build && npm run test:ci",
+    "prepublishOnly": "npm run lint && npm run build && npm run test:ci",
     "dev": "tsc -w",
     "test": "jest",
-    "test:ci": "jest --ci --runInBand"
+    "test:ci": "jest --ci --runInBand",
+    "lint": "eslint nodes credentials package.json --max-warnings=0"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
+    "@n8n/node-cli": "0.50.2",
     "@types/jest": "30.0.0",
     "jest": "30.4.2",
     "n8n-workflow": "^1.0.0",

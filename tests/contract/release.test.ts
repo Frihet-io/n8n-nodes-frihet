@@ -31,8 +31,9 @@ const EXPECTED_RUNS: Record<string, string> = {
 	'Verify dispatch provenance': "node .github/scripts/release-control.cjs verify-dispatch | grep -Fx 'release-control:verify-dispatch:ok'",
 	'Verify protected release environment': "node .github/scripts/release-control.cjs verify-environment | grep -Fx 'release-control:verify-environment:ok'",
 	'Verify exact package metadata': "node .github/scripts/release-control.cjs verify-metadata | grep -Fx 'release-control:verify-metadata:ok'",
-	'Install from lockfile': 'npm ci --no-audit --no-fund',
+	'Install from lockfile': 'npm ci --ignore-scripts --no-audit --no-fund',
 	'Build exact committed artifacts': [
+		'npm run lint',
 		'npm run build',
 		'git diff --exit-code -- dist',
 		'test -z "$(git status --porcelain --untracked-files=no)"',

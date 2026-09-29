@@ -5,7 +5,20 @@ class FrihetApi {
     constructor() {
         this.name = 'frihetApi';
         this.displayName = 'Frihet API';
-        this.documentationUrl = 'https://docs.frihet.io/api';
+        this.documentationUrl = 'https://docs.frihet.io/desarrolladores/api-rest';
+        this.icon = { light: 'file:../nodes/Frihet/frihet.svg', dark: 'file:../nodes/Frihet/frihet.svg' };
+        this.authenticate = {
+            type: 'generic',
+            properties: { headers: { Authorization: '=Bearer {{$credentials.apiKey}}' } },
+        };
+        this.test = {
+            request: {
+                baseURL: '={{$credentials.baseUrl || "https://api.frihet.io"}}',
+                url: '/v1/clients',
+                method: 'GET',
+                qs: { limit: 1 },
+            },
+        };
         this.properties = [
             {
                 displayName: 'API Key',

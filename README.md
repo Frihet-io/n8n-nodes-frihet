@@ -11,12 +11,16 @@ Create invoices, manage expenses, sync clients, and automate your business workf
 
 ## Installation
 
-### n8n Cloud / Self-hosted UI
+### Self-hosted n8n
 
-In your n8n instance: **Settings → Community Nodes → Install → `n8n-nodes-frihet`**
+In a self-hosted instance with community packages enabled, open
+**Settings → Community Nodes → Install** and enter `n8n-nodes-frihet`.
 
-> Community nodes require n8n ≥ 0.187.0 and must be enabled in your instance settings
-> (`N8N_NODES_INCLUDE_UNVERIFIED=true` for self-hosted).
+### n8n Cloud
+
+Verification by n8n is pending. This package is not currently available as a
+verified node on n8n Cloud. Once approved, users with verified community nodes
+enabled can discover and install Frihet from the node panel.
 
 ### npm (self-hosted / Docker)
 
@@ -130,14 +134,34 @@ activated. See `CONTRACT_MATRIX.md` §6.
 - `Idempotency-Key` propagation on fiscal writes (currently the node does
   not emit it; retries of fiscal writes can produce duplicate fiscal numbers)
 
-The Frihet [MCP Server](https://www.npmjs.com/package/@frihet/mcp-server)
-source is `1.17.0` at `Frihet-io/frihet-mcp` main
-`64934a5aa3377534756a87692f48d42c4bd58e4f`; npm remains `1.16.6`
-until that separate release is published. The source exposes 162 canonical
-operations with conservative capability and side-effect metadata. **It does
-not expose a Payment Authority V1 write tool** — `mark_invoice_paid` wraps the
-same legacy REST endpoint and has the same V1 divergence risk. Use the Frihet
-app's Payment Authority V1 UI for V1 mark-paid.
+The [Frihet MCP Server](https://github.com/Frihet-io/frihet-mcp) is maintained
+and released separately. Its package version and directory approvals do not
+establish this node's release or verification status.
+
+## Development and verification
+
+Install the locked dependencies with `npm ci --ignore-scripts`, then run:
+
+```bash
+npm run lint
+npm run build
+npm run test:ci
+```
+
+The linter uses n8n's official configuration with Cloud compatibility checks.
+Tests and release scripts are outside the published `dist` package and are
+checked by the contract suite. Development-only native packages pulled in by
+the n8n CLI are not needed by these checks or included in the published node.
+
+Before submitting, run the official scanner against the published version:
+
+```bash
+npx @n8n/scan-community-package n8n-nodes-frihet
+```
+
+A scanner failure, missing npm provenance, or an untested live API workflow
+blocks verification. Follow [OFFICIAL_NODE_GUIDE.md](./OFFICIAL_NODE_GUIDE.md)
+for the protected release and submission steps.
 
 ## Links
 

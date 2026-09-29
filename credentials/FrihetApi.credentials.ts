@@ -1,9 +1,25 @@
-import { ICredentialType, INodeProperties } from 'n8n-workflow';
+import { IAuthenticateGeneric, ICredentialTestRequest, ICredentialType, INodeProperties, Icon } from 'n8n-workflow';
 
 export class FrihetApi implements ICredentialType {
 	name = 'frihetApi';
 	displayName = 'Frihet API';
-	documentationUrl = 'https://docs.frihet.io/api';
+	documentationUrl = 'https://docs.frihet.io/desarrolladores/api-rest';
+
+	icon: Icon = { light: 'file:../nodes/Frihet/frihet.svg', dark: 'file:../nodes/Frihet/frihet.svg' };
+
+	authenticate: IAuthenticateGeneric = {
+		type: 'generic',
+		properties: { headers: { Authorization: '=Bearer {{$credentials.apiKey}}' } },
+	};
+
+	test: ICredentialTestRequest = {
+		request: {
+			baseURL: '={{$credentials.baseUrl || "https://api.frihet.io"}}',
+			url: '/v1/clients',
+			method: 'GET',
+			qs: { limit: 1 },
+		},
+	};
 	properties: INodeProperties[] = [
 		{
 			displayName: 'API Key',

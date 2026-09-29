@@ -11,9 +11,8 @@ async function frihetApiRequest(method, endpoint, body, qs) {
     const baseUrl = (credentials.baseUrl || 'https://api.frihet.io').replace(/\/$/, '');
     const options = {
         method,
-        uri: `${baseUrl}/v1${endpoint}`,
+        url: `${baseUrl}/v1${endpoint}`,
         headers: {
-            Authorization: `Bearer ${credentials.apiKey}`,
             'Content-Type': 'application/json',
         },
         body,
@@ -25,16 +24,19 @@ async function frihetApiRequest(method, endpoint, body, qs) {
         delete options.body;
     }
     try {
-        return await this.helpers.request(options);
+        return await this.helpers.httpRequestWithAuthentication.call(this, 'frihetApi', options);
     }
     catch (error) {
+        const apiError = error;
         // Unwrap Frihet API error envelope
-        const errorMessage = error?.response?.body?.error ||
-            error?.response?.body?.message ||
-            error?.message ||
+        const errorMessage = apiError?.response?.body?.error ||
+            apiError?.response?.body?.message ||
+            apiError?.response?.data?.error ||
+            apiError?.response?.data?.message ||
+            apiError?.message ||
             'Unknown error';
-        const statusCode = error?.statusCode || error?.response?.statusCode;
-        throw new n8n_workflow_1.NodeApiError(this.getNode(), error, {
+        const statusCode = apiError?.statusCode || apiError?.response?.statusCode || apiError?.response?.status;
+        throw new n8n_workflow_1.NodeApiError(this.getNode(), (error instanceof Error ? error : { message: String(error) }), {
             message: `Frihet API error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`,
         });
     }

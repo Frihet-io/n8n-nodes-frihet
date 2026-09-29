@@ -7,9 +7,10 @@
  *
  * Pattern: each test sets up a `params` map and a `responseFor(request)` that
  * returns canned server responses. The harness captures every HTTP request
- * through `this.helpers.request` so assertions can compare the wire shape
+ * through `this.helpers.httpRequestWithAuthentication` so assertions can compare the wire shape
  * against the documented zod schemas in publicApi.ts.
  */
+import { FrihetApi } from '../../credentials/FrihetApi.credentials';
 import {
 	IExecuteFunctions,
 	IDataObject,
@@ -83,11 +84,15 @@ export function buildMockContext(options: MockOptions): {
 		continueOnFail: () => options.continueOnFail ?? false,
 		getNode: () => NODE,
 		helpers: {
-			request: async (opts: any) => {
+			httpRequestWithAuthentication: async (credentialType: string, opts: any) => {
+				if (credentialType !== 'frihetApi') throw new Error('Unexpected credential type');
 				const req: CapturedRequest = {
 					method: opts.method,
-					uri: opts.uri,
-					headers: { ...(opts.headers ?? {}) },
+					uri: opts.url,
+					headers: {
+						Authorization: String(new FrihetApi().authenticate.properties.headers!.Authorization).replace(/^=/, '').replace('{{$credentials.apiKey}}', String(options.credentials?.apiKey ?? 'fri_test_key_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
+						...(opts.headers ?? {}),
+					},
 					body: opts.body,
 					qs: opts.qs,
 				};
@@ -103,7 +108,7 @@ export function buildMockContext(options: MockOptions): {
 
 /**
  * Convert any object body to JSON-encoded shape expected by the wire.
- * Mirrors what options helpers.request does (json: true).
+ * Mirrors what options helpers.httpRequestWithAuthentication does (json: true).
  */
 export function jsonBody(req: CapturedRequest): any {
 	return req.body;
