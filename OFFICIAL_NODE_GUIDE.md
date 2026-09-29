@@ -6,9 +6,9 @@ PRs adding new nodes to the n8n monorepo are **auto-closed** unless explicitly i
 ## The Path: Verified Community Node
 1. Publish or reconcile community node `1.0.2` on npm (verify registry state;
    source metadata alone is not publication evidence)
-2. Submit to Creator Portal: `internal.users.n8n.cloud/form/f0ff9304-f34a-420e-99da-6103a2f8ac5b`
-3. Review: 4-7 weeks
-4. Result: Shield badge + appears in canvas node browser for all users
+2. Submit to Creator Portal: `https://creators.n8n.io/nodes`
+3. Await automated checks and n8n review; no approval date is guaranteed
+4. After acceptance: verified badge and discovery in the n8n node panel, including n8n Cloud
 
 ## Measured Requirements
 - MIT package declaration: present.
@@ -16,13 +16,17 @@ PRs adding new nodes to the n8n monorepo are **auto-closed** unless explicitly i
 - `n8n-community-node-package` keyword: present.
 - Contract tests: run on Node 20 and 22 in CI; they execute the node transport,
   template expressions, package allowlist, and release-policy mutants.
-- Deterministic artifacts: CI runs `npm ci`, rebuilds `dist`, and requires
+- Deterministic artifacts: CI runs `npm ci --ignore-scripts`, rebuilds `dist`, and requires
   `git diff --exit-code -- dist`.
 - Provenance: source metadata does not claim registry provenance.
   `.github/workflows/release.yml` uses npm trusted publishing with OIDC and
   reconciles `gitHead`, integrity, shasum, downloaded tarball bytes, file
   allowlist/count/sizes, immutable tag, and GitHub Release.
-- Verification and UX review: still outstanding.
+- Official community-node ESLint configuration passes on the published runtime source.
+- Credential testing uses a read-only GET; runtime requests use the authenticated n8n HTTP helper.
+- Since May 1, 2026, submissions require GitHub Actions provenance.
+- Provider verification and manual UX review remain outstanding.
+- September 29 registry readback: published 1.0.1 has no provenance; the official scanner rejects it. A locally passing candidate does not change that registry status.
 
 ## Owner setup required before the first release dispatch
 
@@ -46,9 +50,9 @@ npm trusted publisher causes `npm publish` to fail authentication; no
 reviewed by an owner.
 
 ## Key Links
-- Verification guidelines: docs.n8n.io/integrations/creating-nodes/build/reference/verification-guidelines/
-- UX guidelines: docs.n8n.io/integrations/creating-nodes/build/reference/ux-guidelines/
-- Creator Portal: internal.users.n8n.cloud/form/f0ff9304-f34a-420e-99da-6103a2f8ac5b
+- Verification guidelines: https://docs.n8n.io/connect/create-nodes/build-your-node/reference/verification-guidelines/
+- UX guidelines: https://docs.n8n.io/connect/create-nodes/build-your-node/reference/ux-guidelines/
+- Creator Portal: https://creators.n8n.io/nodes
 - n8n-nodes-starter: github.com/n8n-io/n8n-nodes-starter
 
 ## Remaining Before Submission
@@ -58,3 +62,14 @@ reviewed by an owner.
 - [ ] Complete or reconcile the protected `1.0.2` terminal release state and retain npm/GitHub readback evidence
 - [ ] Verify against UX guidelines
 - [ ] Submit to Creator Portal
+
+## Current first-release blockers (September 29, 2026)
+
+The `npm-release` environment does not yet exist, main has no branch protection,
+and the repository currently has only one collaborator (`berthelius`). Its
+reviewed release contract requires an independent reviewer and must not be
+silently weakened. npm is signed in as `frihet`, but the package has no trusted
+publisher configured. These provider settings and an eligible reviewer must be
+resolved before dispatch.
+
+Submission instructions: https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes/

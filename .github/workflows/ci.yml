@@ -25,7 +25,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - name: Install dependencies (deterministic)
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify n8n community node guidelines
+        run: npm run lint
       - name: Typecheck + build
         run: npm run build
       - name: Verify committed dist is reproducible

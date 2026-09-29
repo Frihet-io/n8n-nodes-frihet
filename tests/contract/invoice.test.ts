@@ -6,10 +6,11 @@
  * Each test reproduces a real defect observed in the n8n node vs the live
  * server contract. RED tests pin the contract; fixes turn them GREEN.
  *
- * The harness mocks `this.helpers.request` and captures every HTTP call so
+ * The harness mocks `this.helpers.httpRequestWithAuthentication` and captures every HTTP call so
  * assertions can pin the wire shape. The transport is real (the same
  * shape n8n emits at runtime); only the network leg is replaced.
  */
+import { FrihetApi } from '../../credentials/FrihetApi.credentials';
 import { Frihet } from '../../nodes/Frihet/Frihet.node';
 import { buildMockContext, lastRequest } from '../_helpers/n8n-mock';
 
@@ -426,7 +427,7 @@ describe('Frihet node — contract vs Frihet ERP publicApi d5f3f3cd', () => {
 	});
 
 	describe('request URL & auth header', () => {
-		it('uses POST https://api.frihet.io/v1/... and Bearer auth (apiKeyAuth accepts both)', async () => {
+		it('uses GET https://api.frihet.io/v1/... and Bearer auth (apiKeyAuth accepts both)', async () => {
 			const { ctx, captured } = buildMockContext({
 				params: {
 					resource: 'client',
@@ -465,7 +466,27 @@ describe('Frihet node — contract vs Frihet ERP publicApi d5f3f3cd', () => {
 		});
 	});
 
+	it('credential connection test is read-only and bounded', () => {
+		const credential = new FrihetApi();
+		expect(credential.test.request).toMatchObject({ method: 'GET', url: '/v1/clients', qs: { limit: 1 } });
+		expect(credential.test.request.body).toBeUndefined();
+		expect(credential.properties.find((p) => p.name === 'apiKey')?.typeOptions?.password).toBe(true);
+	});
+
 	describe('error envelope', () => {
+		it('surfaces modern HTTP authentication failures and stops without retrying', async () => {
+			const { ctx, captured } = buildMockContext({
+				params: { resource: 'client', operation: 'get', clientId: 'c_test' },
+				responseFor: () => {
+					throw Object.assign(new Error('Request failed'), {
+						response: { status: 401, data: { error: 'Invalid API key' } },
+					});
+				},
+			});
+			await expect(new Frihet().execute.call(ctx)).rejects.toThrow(/401.*Invalid API key/);
+			expect(captured).toHaveLength(1);
+		});
+
 		it('preserves the API error envelope format from the server', async () => {
 			const { ctx, captured } = buildMockContext({
 				credentials: {

@@ -31,14 +31,15 @@ class Frihet {
         this.description = {
             displayName: 'Frihet',
             name: 'frihet',
-            icon: 'file:frihet.svg',
+            icon: { light: 'file:frihet.svg', dark: 'file:frihet.svg' },
+            usableAsTool: true,
             group: ['transform'],
             version: 1,
             subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
             description: 'AI-native ERP — invoices, expenses, clients, products, quotes, and vendors',
             defaults: { name: 'Frihet' },
-            inputs: ['main'],
-            outputs: ['main'],
+            inputs: [n8n_workflow_1.NodeConnectionTypes.Main],
+            outputs: [n8n_workflow_1.NodeConnectionTypes.Main],
             credentials: [{ name: 'frihetApi', required: true }],
             properties: [
                 // =====================================================================
@@ -58,7 +59,6 @@ class Frihet {
                         { name: 'Vendor', value: 'vendor' },
                     ],
                     default: 'invoice',
-                    description: 'The Frihet resource to operate on',
                 },
                 // =====================================================================
                 // INVOICE operations
@@ -73,7 +73,7 @@ class Frihet {
                         { name: 'Create', value: 'create', description: 'Create a new invoice', action: 'Create an invoice' },
                         { name: 'Delete', value: 'delete', description: 'Delete an invoice', action: 'Delete an invoice' },
                         { name: 'Get', value: 'get', description: 'Retrieve a single invoice by ID', action: 'Get an invoice' },
-                        { name: 'List', value: 'list', description: 'List invoices with optional filters', action: 'List invoices' },
+                        { name: 'Get Many', value: 'list', description: 'List invoices with optional filters', action: 'List invoices' },
                         { name: 'Mark Paid', value: 'markPaid', description: 'Mark an invoice as paid', action: 'Mark invoice as paid' },
                         { name: 'Send', value: 'send', description: 'Send an invoice by email', action: 'Send an invoice' },
                         { name: 'Update', value: 'update', description: 'Update an invoice (partial)', action: 'Update an invoice' },
@@ -93,7 +93,7 @@ class Frihet {
                         { name: 'Create', value: 'create', description: 'Create a new quote', action: 'Create a quote' },
                         { name: 'Delete', value: 'delete', description: 'Delete a quote', action: 'Delete a quote' },
                         { name: 'Get', value: 'get', description: 'Retrieve a single quote by ID', action: 'Get a quote' },
-                        { name: 'List', value: 'list', description: 'List quotes with optional filters', action: 'List quotes' },
+                        { name: 'Get Many', value: 'list', description: 'List quotes with optional filters', action: 'List quotes' },
                         { name: 'Send', value: 'send', description: 'Send a quote by email', action: 'Send a quote' },
                         { name: 'Update', value: 'update', description: 'Update a quote (partial)', action: 'Update a quote' },
                     ],
@@ -112,7 +112,7 @@ class Frihet {
                         { name: 'Create', value: 'create', description: 'Create a new expense', action: 'Create an expense' },
                         { name: 'Delete', value: 'delete', description: 'Delete an expense', action: 'Delete an expense' },
                         { name: 'Get', value: 'get', description: 'Retrieve a single expense by ID', action: 'Get an expense' },
-                        { name: 'List', value: 'list', description: 'List expenses with optional filters', action: 'List expenses' },
+                        { name: 'Get Many', value: 'list', description: 'List expenses with optional filters', action: 'List expenses' },
                         { name: 'Update', value: 'update', description: 'Update an expense (partial)', action: 'Update an expense' },
                     ],
                     default: 'create',
@@ -130,7 +130,7 @@ class Frihet {
                         { name: 'Create', value: 'create', description: 'Create a new client', action: 'Create a client' },
                         { name: 'Delete', value: 'delete', description: 'Delete a client', action: 'Delete a client' },
                         { name: 'Get', value: 'get', description: 'Retrieve a single client by ID', action: 'Get a client' },
-                        { name: 'List', value: 'list', description: 'List clients with optional filters', action: 'List clients' },
+                        { name: 'Get Many', value: 'list', description: 'List clients with optional filters', action: 'List clients' },
                         { name: 'Update', value: 'update', description: 'Update a client (partial)', action: 'Update a client' },
                     ],
                     default: 'create',
@@ -148,7 +148,7 @@ class Frihet {
                         { name: 'Create', value: 'create', description: 'Create a new product', action: 'Create a product' },
                         { name: 'Delete', value: 'delete', description: 'Delete a product', action: 'Delete a product' },
                         { name: 'Get', value: 'get', description: 'Retrieve a single product by ID', action: 'Get a product' },
-                        { name: 'List', value: 'list', description: 'List products with optional filters', action: 'List products' },
+                        { name: 'Get Many', value: 'list', description: 'List products with optional filters', action: 'List products' },
                         { name: 'Update', value: 'update', description: 'Update a product (partial)', action: 'Update a product' },
                     ],
                     default: 'create',
@@ -166,7 +166,7 @@ class Frihet {
                         { name: 'Create', value: 'create', description: 'Create a new vendor', action: 'Create a vendor' },
                         { name: 'Delete', value: 'delete', description: 'Delete a vendor', action: 'Delete a vendor' },
                         { name: 'Get', value: 'get', description: 'Retrieve a single vendor by ID', action: 'Get a vendor' },
-                        { name: 'List', value: 'list', description: 'List vendors with optional filters', action: 'List vendors' },
+                        { name: 'Get Many', value: 'list', description: 'List vendors with optional filters', action: 'List vendors' },
                         { name: 'Update', value: 'update', description: 'Update a vendor (partial)', action: 'Update a vendor' },
                     ],
                     default: 'create',
@@ -306,7 +306,6 @@ class Frihet {
                                     name: 'quantity',
                                     type: 'number',
                                     default: 1,
-                                    description: 'Quantity',
                                 },
                                 {
                                     displayName: 'Unit Price',
@@ -466,11 +465,11 @@ class Frihet {
                     },
                     options: [
                         {
-                            displayName: 'Status',
-                            name: 'status',
+                            displayName: 'Client ID',
+                            name: 'clientId',
                             type: 'string',
                             default: '',
-                            description: 'Filter by status. Invoices: draft, sent, partial, paid, overdue, cancelled. Quotes: draft, sent, accepted, rejected, expired.',
+                            description: 'Filter invoices or quotes by client ID',
                         },
                         {
                             displayName: 'From Date',
@@ -480,13 +479,6 @@ class Frihet {
                             description: 'Filter records from this date (ISO 8601: YYYY-MM-DD)',
                         },
                         {
-                            displayName: 'To Date',
-                            name: 'to',
-                            type: 'string',
-                            default: '',
-                            description: 'Filter records up to this date (ISO 8601: YYYY-MM-DD)',
-                        },
-                        {
                             displayName: 'Search Query',
                             name: 'q',
                             type: 'string',
@@ -494,11 +486,18 @@ class Frihet {
                             description: 'Full-text search query',
                         },
                         {
-                            displayName: 'Client ID',
-                            name: 'clientId',
+                            displayName: 'Status',
+                            name: 'status',
                             type: 'string',
                             default: '',
-                            description: 'Filter invoices or quotes by client ID',
+                            description: 'Filter by status. Invoices: draft, sent, partial, paid, overdue, cancelled. Quotes: draft, sent, accepted, rejected, expired.',
+                        },
+                        {
+                            displayName: 'To Date',
+                            name: 'to',
+                            type: 'string',
+                            default: '',
+                            description: 'Filter records up to this date (ISO 8601: YYYY-MM-DD)',
                         },
                     ],
                 },
@@ -586,11 +585,32 @@ class Frihet {
                     },
                     options: [
                         {
+                            displayName: 'Client Address (JSON)',
+                            name: 'clientAddress',
+                            type: 'json',
+                            default: '{}',
+                            description: 'Structured address object: { street, city, zip, province, country, countryCode }',
+                        },
+                        {
                             displayName: 'Client ID',
                             name: 'clientId',
                             type: 'string',
                             default: '',
                             description: 'Link to an existing client by ID',
+                        },
+                        {
+                            displayName: 'Client Location',
+                            name: 'clientLocation',
+                            type: 'options',
+                            default: 'peninsula',
+                            description: 'Fiscal zone — determines tax regime (IVA, IGIC, IPSI, exempt)',
+                            options: [
+                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
+                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
+                                { name: 'EU (Reverse Charge)', value: 'eu' },
+                                { name: 'Spain (Peninsula)', value: 'peninsula' },
+                                { name: 'World (Exempt)', value: 'world' },
+                            ],
                         },
                         {
                             displayName: 'Client Tax ID',
@@ -600,32 +620,11 @@ class Frihet {
                             description: 'Tax identification number of the client (NIF, VAT, etc.)',
                         },
                         {
-                            displayName: 'Client Location',
-                            name: 'clientLocation',
-                            type: 'options',
-                            default: 'peninsula',
-                            description: 'Fiscal zone — determines tax regime (IVA, IGIC, IPSI, exempt)',
-                            options: [
-                                { name: 'Spain (Peninsula)', value: 'peninsula' },
-                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
-                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
-                                { name: 'EU (Reverse Charge)', value: 'eu' },
-                                { name: 'World (Exempt)', value: 'world' },
-                            ],
-                        },
-                        {
-                            displayName: 'Tax Rate (%)',
-                            name: 'taxRate',
-                            type: 'number',
-                            default: 21,
-                            description: 'Tax rate percentage (IVA/IGIC/IPSI). Leave 0 for exempt.',
-                        },
-                        {
-                            displayName: 'IRPF Rate (%)',
-                            name: 'irpfRate',
-                            type: 'number',
-                            default: 0,
-                            description: 'IRPF withholding tax rate (Spain only, typically 15%)',
+                            displayName: 'Due Date',
+                            name: 'dueDate',
+                            type: 'string',
+                            default: '',
+                            description: 'Payment due date (ISO 8601: YYYY-MM-DD)',
                         },
                         {
                             displayName: 'Equivalence Surcharge Rate (%)',
@@ -635,31 +634,18 @@ class Frihet {
                             description: 'Recargo de equivalencia rate (e.g. 5.2% for general goods)',
                         },
                         {
+                            displayName: 'IRPF Rate (%)',
+                            name: 'irpfRate',
+                            type: 'number',
+                            default: 0,
+                            description: 'IRPF withholding tax rate (Spain only, typically 15%)',
+                        },
+                        {
                             displayName: 'Issue Date',
                             name: 'issueDate',
                             type: 'string',
                             default: '',
                             description: 'Invoice issue date (ISO 8601: YYYY-MM-DD). Defaults to today.',
-                        },
-                        {
-                            displayName: 'Due Date',
-                            name: 'dueDate',
-                            type: 'string',
-                            default: '',
-                            description: 'Payment due date (ISO 8601: YYYY-MM-DD)',
-                        },
-                        {
-                            displayName: 'Status',
-                            name: 'status',
-                            type: 'options',
-                            default: 'draft',
-                            options: [
-                                { name: 'Draft', value: 'draft' },
-                                { name: 'Sent', value: 'sent' },
-                                { name: 'Paid', value: 'paid' },
-                                { name: 'Overdue', value: 'overdue' },
-                                { name: 'Cancelled', value: 'cancelled' },
-                            ],
                         },
                         {
                             displayName: 'Notes',
@@ -669,13 +655,6 @@ class Frihet {
                             description: 'Additional notes or payment instructions',
                         },
                         {
-                            displayName: 'Series ID',
-                            name: 'seriesId',
-                            type: 'string',
-                            default: '',
-                            description: 'Invoice numbering series ID (from Settings → Numbering)',
-                        },
-                        {
                             displayName: 'Prepayment Amount',
                             name: 'prepayment',
                             type: 'number',
@@ -683,11 +662,31 @@ class Frihet {
                             description: 'Prepayment or advance amount to deduct from total',
                         },
                         {
-                            displayName: 'Client Address (JSON)',
-                            name: 'clientAddress',
-                            type: 'json',
-                            default: '{}',
-                            description: 'Structured address object: { street, city, zip, province, country, countryCode }',
+                            displayName: 'Series ID',
+                            name: 'seriesId',
+                            type: 'string',
+                            default: '',
+                            description: 'Invoice numbering series ID (from Settings → Numbering)',
+                        },
+                        {
+                            displayName: 'Status',
+                            name: 'status',
+                            type: 'options',
+                            default: 'draft',
+                            options: [
+                                { name: 'Cancelled', value: 'cancelled' },
+                                { name: 'Draft', value: 'draft' },
+                                { name: 'Overdue', value: 'overdue' },
+                                { name: 'Paid', value: 'paid' },
+                                { name: 'Sent', value: 'sent' },
+                            ],
+                        },
+                        {
+                            displayName: 'Tax Rate (%)',
+                            name: 'taxRate',
+                            type: 'number',
+                            default: 21,
+                            description: 'Tax rate percentage (IVA/IGIC/IPSI). Leave 0 for exempt.',
                         },
                     ],
                 },
@@ -708,14 +707,27 @@ class Frihet {
                     },
                     options: [
                         {
-                            displayName: 'Client Name',
-                            name: 'clientName',
+                            displayName: 'Client ID',
+                            name: 'clientId',
                             type: 'string',
                             default: '',
                         },
                         {
-                            displayName: 'Client ID',
-                            name: 'clientId',
+                            displayName: 'Client Location',
+                            name: 'clientLocation',
+                            type: 'options',
+                            default: 'peninsula',
+                            options: [
+                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
+                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
+                                { name: 'EU (Reverse Charge)', value: 'eu' },
+                                { name: 'Spain (Peninsula)', value: 'peninsula' },
+                                { name: 'World (Exempt)', value: 'world' },
+                            ],
+                        },
+                        {
+                            displayName: 'Client Name',
+                            name: 'clientName',
                             type: 'string',
                             default: '',
                         },
@@ -726,49 +738,16 @@ class Frihet {
                             default: '',
                         },
                         {
-                            displayName: 'Client Location',
-                            name: 'clientLocation',
-                            type: 'options',
-                            default: 'peninsula',
-                            options: [
-                                { name: 'Spain (Peninsula)', value: 'peninsula' },
-                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
-                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
-                                { name: 'EU (Reverse Charge)', value: 'eu' },
-                                { name: 'World (Exempt)', value: 'world' },
-                            ],
-                        },
-                        {
-                            displayName: 'Tax Rate (%)',
-                            name: 'taxRate',
-                            type: 'number',
-                            default: 21,
+                            displayName: 'Due Date',
+                            name: 'dueDate',
+                            type: 'string',
+                            default: '',
                         },
                         {
                             displayName: 'IRPF Rate (%)',
                             name: 'irpfRate',
                             type: 'number',
                             default: 0,
-                        },
-                        {
-                            displayName: 'Status',
-                            name: 'status',
-                            type: 'options',
-                            default: 'draft',
-                            options: [
-                                { name: 'Draft', value: 'draft' },
-                                { name: 'Sent', value: 'sent' },
-                                { name: 'Partial', value: 'partial' },
-                                { name: 'Paid', value: 'paid' },
-                                { name: 'Overdue', value: 'overdue' },
-                                { name: 'Cancelled', value: 'cancelled' },
-                            ],
-                        },
-                        {
-                            displayName: 'Due Date',
-                            name: 'dueDate',
-                            type: 'string',
-                            default: '',
                         },
                         {
                             displayName: 'Notes',
@@ -781,6 +760,26 @@ class Frihet {
                             name: 'seriesId',
                             type: 'string',
                             default: '',
+                        },
+                        {
+                            displayName: 'Status',
+                            name: 'status',
+                            type: 'options',
+                            default: 'draft',
+                            options: [
+                                { name: 'Cancelled', value: 'cancelled' },
+                                { name: 'Draft', value: 'draft' },
+                                { name: 'Overdue', value: 'overdue' },
+                                { name: 'Paid', value: 'paid' },
+                                { name: 'Partial', value: 'partial' },
+                                { name: 'Sent', value: 'sent' },
+                            ],
+                        },
+                        {
+                            displayName: 'Tax Rate (%)',
+                            name: 'taxRate',
+                            type: 'number',
+                            default: 21,
                         },
                     ],
                 },
@@ -801,11 +800,31 @@ class Frihet {
                     },
                     options: [
                         {
+                            displayName: 'Client Address (JSON)',
+                            name: 'clientAddress',
+                            type: 'json',
+                            default: '{}',
+                            description: 'Structured address: { street, city, zip, province, country, countryCode }',
+                        },
+                        {
                             displayName: 'Client ID',
                             name: 'clientId',
                             type: 'string',
                             default: '',
                             description: 'Link to an existing client by ID',
+                        },
+                        {
+                            displayName: 'Client Location',
+                            name: 'clientLocation',
+                            type: 'options',
+                            default: 'peninsula',
+                            options: [
+                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
+                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
+                                { name: 'EU (Reverse Charge)', value: 'eu' },
+                                { name: 'Spain (Peninsula)', value: 'peninsula' },
+                                { name: 'World (Exempt)', value: 'world' },
+                            ],
                         },
                         {
                             displayName: 'Client Tax ID',
@@ -814,23 +833,10 @@ class Frihet {
                             default: '',
                         },
                         {
-                            displayName: 'Client Location',
-                            name: 'clientLocation',
-                            type: 'options',
-                            default: 'peninsula',
-                            options: [
-                                { name: 'Spain (Peninsula)', value: 'peninsula' },
-                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
-                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
-                                { name: 'EU (Reverse Charge)', value: 'eu' },
-                                { name: 'World (Exempt)', value: 'world' },
-                            ],
-                        },
-                        {
-                            displayName: 'Tax Rate (%)',
-                            name: 'taxRate',
-                            type: 'number',
-                            default: 21,
+                            displayName: 'Due Date',
+                            name: 'dueDate',
+                            type: 'string',
+                            default: '',
                         },
                         {
                             displayName: 'IRPF Rate (%)',
@@ -845,17 +851,10 @@ class Frihet {
                             default: '',
                         },
                         {
-                            displayName: 'Due Date',
-                            name: 'dueDate',
+                            displayName: 'Notes',
+                            name: 'notes',
                             type: 'string',
                             default: '',
-                        },
-                        {
-                            displayName: 'Valid Until',
-                            name: 'validUntil',
-                            type: 'string',
-                            default: '',
-                            description: 'Expiration date of the quote (ISO 8601: YYYY-MM-DD)',
                         },
                         {
                             displayName: 'Status',
@@ -863,25 +862,25 @@ class Frihet {
                             type: 'options',
                             default: 'draft',
                             options: [
-                                { name: 'Draft', value: 'draft' },
-                                { name: 'Sent', value: 'sent' },
                                 { name: 'Accepted', value: 'accepted' },
-                                { name: 'Rejected', value: 'rejected' },
+                                { name: 'Draft', value: 'draft' },
                                 { name: 'Expired', value: 'expired' },
+                                { name: 'Rejected', value: 'rejected' },
+                                { name: 'Sent', value: 'sent' },
                             ],
                         },
                         {
-                            displayName: 'Notes',
-                            name: 'notes',
-                            type: 'string',
-                            default: '',
+                            displayName: 'Tax Rate (%)',
+                            name: 'taxRate',
+                            type: 'number',
+                            default: 21,
                         },
                         {
-                            displayName: 'Client Address (JSON)',
-                            name: 'clientAddress',
-                            type: 'json',
-                            default: '{}',
-                            description: 'Structured address: { street, city, zip, province, country, countryCode }',
+                            displayName: 'Valid Until',
+                            name: 'validUntil',
+                            type: 'string',
+                            default: '',
+                            description: 'Expiration date of the quote (ISO 8601: YYYY-MM-DD)',
                         },
                     ],
                 },
@@ -902,22 +901,16 @@ class Frihet {
                     },
                     options: [
                         {
-                            displayName: 'Client Name',
-                            name: 'clientName',
-                            type: 'string',
-                            default: '',
-                        },
-                        {
                             displayName: 'Client ID',
                             name: 'clientId',
                             type: 'string',
                             default: '',
                         },
                         {
-                            displayName: 'Tax Rate (%)',
-                            name: 'taxRate',
-                            type: 'number',
-                            default: 21,
+                            displayName: 'Client Name',
+                            name: 'clientName',
+                            type: 'string',
+                            default: '',
                         },
                         {
                             displayName: 'IRPF Rate (%)',
@@ -926,27 +919,33 @@ class Frihet {
                             default: 0,
                         },
                         {
+                            displayName: 'Notes',
+                            name: 'notes',
+                            type: 'string',
+                            default: '',
+                        },
+                        {
                             displayName: 'Status',
                             name: 'status',
                             type: 'options',
                             default: 'draft',
                             options: [
-                                { name: 'Draft', value: 'draft' },
-                                { name: 'Sent', value: 'sent' },
                                 { name: 'Accepted', value: 'accepted' },
-                                { name: 'Rejected', value: 'rejected' },
+                                { name: 'Draft', value: 'draft' },
                                 { name: 'Expired', value: 'expired' },
+                                { name: 'Rejected', value: 'rejected' },
+                                { name: 'Sent', value: 'sent' },
                             ],
+                        },
+                        {
+                            displayName: 'Tax Rate (%)',
+                            name: 'taxRate',
+                            type: 'number',
+                            default: 21,
                         },
                         {
                             displayName: 'Valid Until',
                             name: 'validUntil',
-                            type: 'string',
-                            default: '',
-                        },
-                        {
-                            displayName: 'Notes',
-                            name: 'notes',
                             type: 'string',
                             default: '',
                         },
@@ -969,67 +968,27 @@ class Frihet {
                     },
                     options: [
                         {
-                            displayName: 'Date',
-                            name: 'date',
-                            type: 'string',
-                            default: '',
-                            description: 'Expense date (ISO 8601: YYYY-MM-DD). Defaults to today.',
-                        },
-                        {
                             displayName: 'Category',
                             name: 'category',
                             type: 'options',
                             default: 'other',
                             options: [
+                                { name: 'Equipment', value: 'equipment' },
+                                { name: 'Marketing & Advertising', value: 'marketing' },
+                                { name: 'Meals & Entertainment', value: 'meals' },
                                 { name: 'Office Supplies', value: 'office_supplies' },
+                                { name: 'Other', value: 'other' },
+                                { name: 'Professional Services', value: 'professional_services' },
                                 { name: 'Software & Subscriptions', value: 'software' },
                                 { name: 'Travel', value: 'travel' },
-                                { name: 'Meals & Entertainment', value: 'meals' },
-                                { name: 'Marketing & Advertising', value: 'marketing' },
-                                { name: 'Professional Services', value: 'professional_services' },
-                                { name: 'Equipment', value: 'equipment' },
-                                { name: 'Other', value: 'other' },
                             ],
                         },
                         {
-                            displayName: 'Vendor Name',
-                            name: 'vendor',
+                            displayName: 'Date',
+                            name: 'date',
                             type: 'string',
                             default: '',
-                            description: 'Name of the vendor (free text)',
-                        },
-                        {
-                            displayName: 'Vendor ID',
-                            name: 'vendorId',
-                            type: 'string',
-                            default: '',
-                            description: 'Link to an existing vendor by ID',
-                        },
-                        {
-                            displayName: 'Tax Amount',
-                            name: 'tax',
-                            type: 'number',
-                            default: 0,
-                            description: 'Tax amount (VAT/IVA/IGIC paid — for deductibility)',
-                        },
-                        {
-                            displayName: 'Tax Type',
-                            name: 'taxType',
-                            type: 'options',
-                            default: 'IVA',
-                            options: [
-                                { name: 'IVA (Spain Peninsula)', value: 'IVA' },
-                                { name: 'IGIC (Canary Islands)', value: 'IGIC' },
-                                { name: 'IPSI (Ceuta/Melilla)', value: 'IPSI' },
-                                { name: 'Exempt', value: 'Exento' },
-                            ],
-                        },
-                        {
-                            displayName: 'IRPF Amount',
-                            name: 'irpf',
-                            type: 'number',
-                            default: 0,
-                            description: 'IRPF withholding on this expense (Spain only)',
+                            description: 'Expense date (ISO 8601: YYYY-MM-DD). Defaults to today.',
                         },
                         {
                             displayName: 'Invoice Number',
@@ -1039,11 +998,11 @@ class Frihet {
                             description: "Vendor's invoice number for this expense",
                         },
                         {
-                            displayName: 'Tax Deductible',
-                            name: 'taxDeductible',
-                            type: 'boolean',
-                            default: true,
-                            description: 'Whether this expense is tax-deductible',
+                            displayName: 'IRPF Amount',
+                            name: 'irpf',
+                            type: 'number',
+                            default: 0,
+                            description: 'IRPF withholding on this expense (Spain only)',
                         },
                         {
                             displayName: 'Is Investment Good',
@@ -1051,6 +1010,46 @@ class Frihet {
                             type: 'boolean',
                             default: false,
                             description: 'Whether this is an investment good (for amortization)',
+                        },
+                        {
+                            displayName: 'Tax Amount',
+                            name: 'tax',
+                            type: 'number',
+                            default: 0,
+                            description: 'Tax amount (VAT/IVA/IGIC paid — for deductibility)',
+                        },
+                        {
+                            displayName: 'Tax Deductible',
+                            name: 'taxDeductible',
+                            type: 'boolean',
+                            default: true,
+                            description: 'Whether this expense is tax-deductible',
+                        },
+                        {
+                            displayName: 'Tax Type',
+                            name: 'taxType',
+                            type: 'options',
+                            default: 'IVA',
+                            options: [
+                                { name: 'Exempt', value: 'Exento' },
+                                { name: 'IGIC (Canary Islands)', value: 'IGIC' },
+                                { name: 'IPSI (Ceuta/Melilla)', value: 'IPSI' },
+                                { name: 'IVA (Spain Peninsula)', value: 'IVA' },
+                            ],
+                        },
+                        {
+                            displayName: 'Vendor ID',
+                            name: 'vendorId',
+                            type: 'string',
+                            default: '',
+                            description: 'Link to an existing vendor by ID',
+                        },
+                        {
+                            displayName: 'Vendor Name',
+                            name: 'vendor',
+                            type: 'string',
+                            default: '',
+                            description: 'Name of the vendor (free text)',
                         },
                     ],
                 },
@@ -1071,22 +1070,10 @@ class Frihet {
                     },
                     options: [
                         {
-                            displayName: 'Description',
-                            name: 'description',
-                            type: 'string',
-                            default: '',
-                        },
-                        {
                             displayName: 'Amount',
                             name: 'amount',
                             type: 'number',
                             default: 0,
-                        },
-                        {
-                            displayName: 'Date',
-                            name: 'date',
-                            type: 'string',
-                            default: '',
                         },
                         {
                             displayName: 'Category',
@@ -1095,8 +1082,14 @@ class Frihet {
                             default: '',
                         },
                         {
-                            displayName: 'Vendor Name',
-                            name: 'vendor',
+                            displayName: 'Date',
+                            name: 'date',
+                            type: 'string',
+                            default: '',
+                        },
+                        {
+                            displayName: 'Description',
+                            name: 'description',
                             type: 'string',
                             default: '',
                         },
@@ -1107,22 +1100,28 @@ class Frihet {
                             default: 0,
                         },
                         {
+                            displayName: 'Tax Deductible',
+                            name: 'taxDeductible',
+                            type: 'boolean',
+                            default: true,
+                        },
+                        {
                             displayName: 'Tax Type',
                             name: 'taxType',
                             type: 'options',
                             default: 'IVA',
                             options: [
-                                { name: 'IVA', value: 'IVA' },
+                                { name: 'Exempt', value: 'Exento' },
                                 { name: 'IGIC', value: 'IGIC' },
                                 { name: 'IPSI', value: 'IPSI' },
-                                { name: 'Exempt', value: 'Exento' },
+                                { name: 'IVA', value: 'IVA' },
                             ],
                         },
                         {
-                            displayName: 'Tax Deductible',
-                            name: 'taxDeductible',
-                            type: 'boolean',
-                            default: true,
+                            displayName: 'Vendor Name',
+                            name: 'vendor',
+                            type: 'string',
+                            default: '',
                         },
                     ],
                 },
@@ -1143,11 +1142,64 @@ class Frihet {
                     },
                     options: [
                         {
+                            displayName: 'Address (JSON)',
+                            name: 'address',
+                            type: 'json',
+                            default: '{}',
+                            description: 'Structured address: { street, city, zip, province, country, countryCode }',
+                        },
+                        {
+                            displayName: 'Apply Equivalence Surcharge',
+                            name: 'applyEquivalenceSurcharge',
+                            type: 'boolean',
+                            default: false,
+                            description: 'Whether to apply recargo de equivalencia (Spain retailers)',
+                        },
+                        {
+                            displayName: 'Client Type',
+                            name: 'clientType',
+                            type: 'options',
+                            default: 'company',
+                            options: [
+                                { name: 'Company', value: 'company' },
+                                { name: 'Individual', value: 'individual' },
+                            ],
+                        },
+                        {
+                            displayName: 'CRM Stage',
+                            name: 'stage',
+                            type: 'options',
+                            default: 'active',
+                            options: [
+                                { name: 'Active', value: 'active' },
+                                { name: 'Contacted', value: 'contacted' },
+                                { name: 'Inactive', value: 'inactive' },
+                                { name: 'Lead', value: 'lead' },
+                                { name: 'Lost', value: 'lost' },
+                                { name: 'Proposal', value: 'proposal' },
+                            ],
+                        },
+                        {
                             displayName: 'Email',
                             name: 'email',
                             type: 'string',
+                            placeholder: 'name@email.com',
                             default: '',
                             description: 'Client email address (used for sending invoices)',
+                        },
+                        {
+                            displayName: 'Fiscal Zone',
+                            name: 'fiscalZone',
+                            type: 'options',
+                            default: 'peninsula',
+                            description: 'Determines tax regime applied to invoices for this client',
+                            options: [
+                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
+                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
+                                { name: 'EU (Reverse Charge)', value: 'eu' },
+                                { name: 'Spain (Peninsula)', value: 'peninsula' },
+                                { name: 'World (Exempt)', value: 'world' },
+                            ],
                         },
                         {
                             displayName: 'Phone',
@@ -1168,58 +1220,6 @@ class Frihet {
                             type: 'string',
                             default: '',
                         },
-                        {
-                            displayName: 'Fiscal Zone',
-                            name: 'fiscalZone',
-                            type: 'options',
-                            default: 'peninsula',
-                            description: 'Determines tax regime applied to invoices for this client',
-                            options: [
-                                { name: 'Spain (Peninsula)', value: 'peninsula' },
-                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
-                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
-                                { name: 'EU (Reverse Charge)', value: 'eu' },
-                                { name: 'World (Exempt)', value: 'world' },
-                            ],
-                        },
-                        {
-                            displayName: 'Client Type',
-                            name: 'clientType',
-                            type: 'options',
-                            default: 'company',
-                            options: [
-                                { name: 'Company', value: 'company' },
-                                { name: 'Individual', value: 'individual' },
-                            ],
-                        },
-                        {
-                            displayName: 'CRM Stage',
-                            name: 'stage',
-                            type: 'options',
-                            default: 'active',
-                            options: [
-                                { name: 'Lead', value: 'lead' },
-                                { name: 'Contacted', value: 'contacted' },
-                                { name: 'Proposal', value: 'proposal' },
-                                { name: 'Active', value: 'active' },
-                                { name: 'Inactive', value: 'inactive' },
-                                { name: 'Lost', value: 'lost' },
-                            ],
-                        },
-                        {
-                            displayName: 'Apply Equivalence Surcharge',
-                            name: 'applyEquivalenceSurcharge',
-                            type: 'boolean',
-                            default: false,
-                            description: 'Whether to apply recargo de equivalencia (Spain retailers)',
-                        },
-                        {
-                            displayName: 'Address (JSON)',
-                            name: 'address',
-                            type: 'json',
-                            default: '{}',
-                            description: 'Structured address: { street, city, zip, province, country, countryCode }',
-                        },
                     ],
                 },
                 // =====================================================================
@@ -1238,38 +1238,6 @@ class Frihet {
                         },
                     },
                     options: [
-                        { displayName: 'Name', name: 'name', type: 'string', default: '' },
-                        { displayName: 'Email', name: 'email', type: 'string', default: '' },
-                        { displayName: 'Phone', name: 'phone', type: 'string', default: '' },
-                        { displayName: 'Tax ID', name: 'taxId', type: 'string', default: '' },
-                        { displayName: 'Website', name: 'website', type: 'string', default: '' },
-                        {
-                            displayName: 'Fiscal Zone',
-                            name: 'fiscalZone',
-                            type: 'options',
-                            default: 'peninsula',
-                            options: [
-                                { name: 'Spain (Peninsula)', value: 'peninsula' },
-                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
-                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
-                                { name: 'EU (Reverse Charge)', value: 'eu' },
-                                { name: 'World (Exempt)', value: 'world' },
-                            ],
-                        },
-                        {
-                            displayName: 'CRM Stage',
-                            name: 'stage',
-                            type: 'options',
-                            default: 'active',
-                            options: [
-                                { name: 'Lead', value: 'lead' },
-                                { name: 'Contacted', value: 'contacted' },
-                                { name: 'Proposal', value: 'proposal' },
-                                { name: 'Active', value: 'active' },
-                                { name: 'Inactive', value: 'inactive' },
-                                { name: 'Lost', value: 'lost' },
-                            ],
-                        },
                         {
                             displayName: 'Client Type',
                             name: 'clientType',
@@ -1280,6 +1248,39 @@ class Frihet {
                                 { name: 'Individual', value: 'individual' },
                             ],
                         },
+                        {
+                            displayName: 'CRM Stage',
+                            name: 'stage',
+                            type: 'options',
+                            default: 'active',
+                            options: [
+                                { name: 'Active', value: 'active' },
+                                { name: 'Contacted', value: 'contacted' },
+                                { name: 'Inactive', value: 'inactive' },
+                                { name: 'Lead', value: 'lead' },
+                                { name: 'Lost', value: 'lost' },
+                                { name: 'Proposal', value: 'proposal' },
+                            ],
+                        },
+                        { displayName: 'Email', name: 'email', type: 'string',
+                            placeholder: 'name@email.com', default: '' },
+                        {
+                            displayName: 'Fiscal Zone',
+                            name: 'fiscalZone',
+                            type: 'options',
+                            default: 'peninsula',
+                            options: [
+                                { name: 'Canary Islands (IGIC)', value: 'canarias' },
+                                { name: 'Ceuta / Melilla (IPSI)', value: 'ceuta_melilla' },
+                                { name: 'EU (Reverse Charge)', value: 'eu' },
+                                { name: 'Spain (Peninsula)', value: 'peninsula' },
+                                { name: 'World (Exempt)', value: 'world' },
+                            ],
+                        },
+                        { displayName: 'Name', name: 'name', type: 'string', default: '' },
+                        { displayName: 'Phone', name: 'phone', type: 'string', default: '' },
+                        { displayName: 'Tax ID', name: 'taxId', type: 'string', default: '' },
+                        { displayName: 'Website', name: 'website', type: 'string', default: '' },
                     ],
                 },
                 // =====================================================================
@@ -1299,10 +1300,28 @@ class Frihet {
                     },
                     options: [
                         {
+                            displayName: 'Active',
+                            name: 'isActive',
+                            type: 'boolean',
+                            default: true,
+                        },
+                        {
+                            displayName: 'Category',
+                            name: 'category',
+                            type: 'string',
+                            default: '',
+                        },
+                        {
                             displayName: 'Description',
                             name: 'description',
                             type: 'string',
                             default: '',
+                        },
+                        {
+                            displayName: 'IRPF Rate (%)',
+                            name: 'irpfRate',
+                            type: 'number',
+                            default: 0,
                         },
                         {
                             displayName: 'SKU',
@@ -1312,28 +1331,10 @@ class Frihet {
                             description: 'Stock keeping unit code',
                         },
                         {
-                            displayName: 'Category',
-                            name: 'category',
-                            type: 'string',
-                            default: '',
-                        },
-                        {
                             displayName: 'Tax Rate (%)',
                             name: 'taxRate',
                             type: 'number',
                             default: 21,
-                        },
-                        {
-                            displayName: 'IRPF Rate (%)',
-                            name: 'irpfRate',
-                            type: 'number',
-                            default: 0,
-                        },
-                        {
-                            displayName: 'Active',
-                            name: 'isActive',
-                            type: 'boolean',
-                            default: true,
                         },
                     ],
                 },
@@ -1353,14 +1354,14 @@ class Frihet {
                         },
                     },
                     options: [
-                        { displayName: 'Name', name: 'name', type: 'string', default: '' },
-                        { displayName: 'Unit Price', name: 'unitPrice', type: 'number', default: 0 },
-                        { displayName: 'Description', name: 'description', type: 'string', default: '' },
-                        { displayName: 'SKU', name: 'sku', type: 'string', default: '' },
-                        { displayName: 'Category', name: 'category', type: 'string', default: '' },
-                        { displayName: 'Tax Rate (%)', name: 'taxRate', type: 'number', default: 21 },
-                        { displayName: 'IRPF Rate (%)', name: 'irpfRate', type: 'number', default: 0 },
                         { displayName: 'Active', name: 'isActive', type: 'boolean', default: true },
+                        { displayName: 'Category', name: 'category', type: 'string', default: '' },
+                        { displayName: 'Description', name: 'description', type: 'string', default: '' },
+                        { displayName: 'IRPF Rate (%)', name: 'irpfRate', type: 'number', default: 0 },
+                        { displayName: 'Name', name: 'name', type: 'string', default: '' },
+                        { displayName: 'SKU', name: 'sku', type: 'string', default: '' },
+                        { displayName: 'Tax Rate (%)', name: 'taxRate', type: 'number', default: 21 },
+                        { displayName: 'Unit Price', name: 'unitPrice', type: 'number', default: 0 },
                     ],
                 },
                 // =====================================================================
@@ -1379,9 +1380,6 @@ class Frihet {
                         },
                     },
                     options: [
-                        { displayName: 'Email', name: 'email', type: 'string', default: '' },
-                        { displayName: 'Phone', name: 'phone', type: 'string', default: '' },
-                        { displayName: 'Tax ID', name: 'taxId', type: 'string', default: '' },
                         {
                             displayName: 'Address (JSON)',
                             name: 'address',
@@ -1389,6 +1387,10 @@ class Frihet {
                             default: '{}',
                             description: 'Structured address: { street, city, zip, province, country, countryCode }',
                         },
+                        { displayName: 'Email', name: 'email', type: 'string',
+                            placeholder: 'name@email.com', default: '' },
+                        { displayName: 'Phone', name: 'phone', type: 'string', default: '' },
+                        { displayName: 'Tax ID', name: 'taxId', type: 'string', default: '' },
                     ],
                 },
                 // =====================================================================
@@ -1407,8 +1409,9 @@ class Frihet {
                         },
                     },
                     options: [
+                        { displayName: 'Email', name: 'email', type: 'string',
+                            placeholder: 'name@email.com', default: '' },
                         { displayName: 'Name', name: 'name', type: 'string', default: '' },
-                        { displayName: 'Email', name: 'email', type: 'string', default: '' },
                         { displayName: 'Phone', name: 'phone', type: 'string', default: '' },
                         { displayName: 'Tax ID', name: 'taxId', type: 'string', default: '' },
                     ],
@@ -1443,7 +1446,7 @@ class Frihet {
                     const idParam = `${resource}Id`;
                     const id = this.getNodeParameter(idParam, i);
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}/${id}`);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // DELETE — single item
@@ -1452,7 +1455,7 @@ class Frihet {
                     const idParam = `${resource}Id`;
                     const id = this.getNodeParameter(idParam, i);
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'DELETE', `/${endpoint}/${id}`);
-                    returnData.push(response?.data ?? { id, deleted: true });
+                    returnData.push((response?.data ?? { id, deleted: true }));
                 }
                 // ===================================================================
                 // LIST — paginated
@@ -1492,7 +1495,7 @@ class Frihet {
                         do {
                             const pageQs = { ...qs, limit: 100, ...(cursor ? { cursor } : {}) };
                             const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
-                            const pageItems = response?.data ?? [];
+                            const pageItems = (response?.data ?? []);
                             allItems = allItems.concat(pageItems);
                             cursor = response?.nextCursor;
                             if (response?.truncated === true)
@@ -1520,7 +1523,7 @@ class Frihet {
                         if (cursor)
                             pageQs.cursor = cursor;
                         const response = await GenericFunctions_1.frihetApiRequest.call(this, 'GET', `/${endpoint}`, undefined, pageQs);
-                        const pageItems = response?.data ?? [];
+                        const pageItems = (response?.data ?? []);
                         if (pageItems.length > 0) {
                             returnData.push(...pageItems);
                             if (response?.truncated === true) {
@@ -1570,7 +1573,7 @@ class Frihet {
                         }
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', '/invoices', body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // CREATE — quote
@@ -1601,7 +1604,7 @@ class Frihet {
                         }
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', '/quotes', body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // CREATE — expense
@@ -1617,7 +1620,7 @@ class Frihet {
                         body[key] = val;
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', '/expenses', body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // CREATE — client
@@ -1640,7 +1643,7 @@ class Frihet {
                         }
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', '/clients', body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // CREATE — product
@@ -1656,7 +1659,7 @@ class Frihet {
                         body[key] = val;
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', '/products', body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // CREATE — vendor
@@ -1679,7 +1682,7 @@ class Frihet {
                         }
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', '/vendors', body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // UPDATE — PATCH (partial) for all resources
@@ -1709,7 +1712,7 @@ class Frihet {
                         throw new n8n_workflow_1.NodeOperationError(this.getNode(), 'Update requires at least one field to update.', { itemIndex: i });
                     }
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'PATCH', `/${endpoint}/${id}`, body);
-                    returnData.push(response?.data ?? response);
+                    returnData.push((response?.data ?? response));
                 }
                 // ===================================================================
                 // SEND — invoice or quote email
@@ -1733,7 +1736,7 @@ class Frihet {
                     }
                     const body = { recipientEmail: emailOverride.trim() };
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', `/${endpoint}/${id}/send`, body);
-                    returnData.push(response?.data ?? response ?? { id, sent: true });
+                    returnData.push((response?.data ?? response ?? { id, sent: true }));
                 }
                 // ===================================================================
                 // MARK PAID — invoice only
@@ -1765,7 +1768,7 @@ class Frihet {
                     if (markPaidAdditional.paidDate)
                         body.paidDate = markPaidAdditional.paidDate;
                     const response = await GenericFunctions_1.frihetApiRequest.call(this, 'POST', `/invoices/${id}/paid`, body);
-                    returnData.push(response?.data ?? response ?? { id, paid: true });
+                    returnData.push((response?.data ?? response ?? { id, paid: true }));
                 }
                 else {
                     throw new n8n_workflow_1.NodeOperationError(this.getNode(), `Unknown operation "${operation}" for resource "${resource}"`, { itemIndex: i });
@@ -1773,10 +1776,10 @@ class Frihet {
             }
             catch (error) {
                 if (this.continueOnFail()) {
-                    returnData.push({ error: error.message });
+                    returnData.push({ error: error instanceof Error ? error.message : String(error) });
                     continue;
                 }
-                throw error;
+                throw new n8n_workflow_1.NodeOperationError(this.getNode(), error instanceof Error ? error : String(error), { itemIndex: i });
             }
         }
         return [this.helpers.returnJsonArray(returnData)];

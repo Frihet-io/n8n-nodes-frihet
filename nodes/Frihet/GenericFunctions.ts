@@ -2,7 +2,8 @@ import {
 	IDataObject,
 	IExecuteFunctions,
 	IHttpRequestMethods,
-	IRequestOptions,
+	IHttpRequestOptions,
+	JsonObject,
 	NodeApiError,
 } from 'n8n-workflow';
 
@@ -16,15 +17,14 @@ export async function frihetApiRequest(
 	endpoint: string,
 	body?: IDataObject,
 	qs?: IDataObject,
-): Promise<any> {
+): Promise<IDataObject> {
 	const credentials = await this.getCredentials('frihetApi');
 	const baseUrl = ((credentials.baseUrl as string) || 'https://api.frihet.io').replace(/\/$/, '');
 
-	const options: IRequestOptions = {
+	const options: IHttpRequestOptions = {
 		method,
-		uri: `${baseUrl}/v1${endpoint}`,
+		url: `${baseUrl}/v1${endpoint}`,
 		headers: {
-			Authorization: `Bearer ${credentials.apiKey}`,
 			'Content-Type': 'application/json',
 		},
 		body,
@@ -38,16 +38,23 @@ export async function frihetApiRequest(
 	}
 
 	try {
-		return await this.helpers.request(options);
-	} catch (error: any) {
+		return await this.helpers.httpRequestWithAuthentication.call(this, 'frihetApi', options);
+	} catch (error: unknown) {
+		const apiError = error as {
+			response?: { body?: { error?: string; message?: string }; data?: { error?: string; message?: string }; statusCode?: number; status?: number };
+			message?: string;
+			statusCode?: number;
+		};
 		// Unwrap Frihet API error envelope
 		const errorMessage =
-			error?.response?.body?.error ||
-			error?.response?.body?.message ||
-			error?.message ||
+			apiError?.response?.body?.error ||
+			apiError?.response?.body?.message ||
+			apiError?.response?.data?.error ||
+			apiError?.response?.data?.message ||
+			apiError?.message ||
 			'Unknown error';
-		const statusCode = error?.statusCode || error?.response?.statusCode;
-		throw new NodeApiError(this.getNode(), error, {
+		const statusCode = apiError?.statusCode || apiError?.response?.statusCode || apiError?.response?.status;
+		throw new NodeApiError(this.getNode(), (error instanceof Error ? error : { message: String(error) }) as JsonObject, {
 			message: `Frihet API error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`,
 		});
 	}
