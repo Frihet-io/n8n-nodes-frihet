@@ -308,19 +308,28 @@ describe('npm release control plane', () => {
 		expect(() => validateReleaseWorkflow(mutant)).toThrow('condition');
 	});
 
-	it('requires reviewer approval, self-review prevention, protected branches, and no admin bypass', () => {
+	it('requires the verified owner approval, protected branches, and no admin bypass', () => {
 		const environment = {
-			protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', id: 1 }], prevent_self_review: true }],
+			protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 135700094 } }], prevent_self_review: false }],
 			deployment_branch_policy: { protected_branches: true },
 			can_admins_bypass: false,
 		};
 		expect(() => control.validateEnvironmentPolicy(environment)).not.toThrow();
+		for (const reviewers of [[], [{ type: 'Team', reviewer: { id: 135700094 } }], [{ type: 'User', reviewer: { id: 1 } }], [...environment.protection_rules[0].reviewers, { type: 'User', reviewer: { id: 2 } }]]) {
+			const wrong = clone(environment);
+			wrong.protection_rules[0].reviewers = reviewers;
+			expect(() => control.validateEnvironmentPolicy(wrong)).toThrow('verified repository owner');
+		}
 		const mutant = clone(environment);
 		mutant.can_admins_bypass = true;
 		expect(() => control.validateEnvironmentPolicy(mutant)).toThrow('administrator bypass');
 	});
 
 	it.each([
+		['unapproved actor', { actor: 'someone' }],
+		['renamed account', { actorId: '1' }],
+		['unapproved rerun', { triggeringActor: 'someone' }],
+		['automatic event', { eventName: 'push' }],
 		['stale version', { inputVersion: '1.0.1' }],
 		['wrong repository', { repository: 'someone/fork' }],
 		['non-main ref', { ref: 'refs/heads/release' }],
@@ -329,6 +338,7 @@ describe('npm release control plane', () => {
 		['tracked node_modules', { trackedNodeModules: 'node_modules/yaml/index.js' }],
 	])('hard-fails dispatch provenance with %s', (_name, mutation) => {
 		const valid = {
+			eventName: 'workflow_dispatch', actor: 'berthelius', actorId: '135700094', triggeringActor: 'berthelius',
 			repository: 'Frihet-io/n8n-nodes-frihet',
 			ref: 'refs/heads/main',
 			inputVersion: '1.0.2',
@@ -342,6 +352,7 @@ describe('npm release control plane', () => {
 
 	it('keeps the original main dispatch SHA retryable after the mutable branch tip advances', () => {
 		expect(() => control.validateDispatchContext({
+			eventName: 'workflow_dispatch', actor: 'berthelius', actorId: '135700094', triggeringActor: 'berthelius',
 			repository: 'Frihet-io/n8n-nodes-frihet',
 			ref: 'refs/heads/main',
 			inputVersion: '1.0.2',

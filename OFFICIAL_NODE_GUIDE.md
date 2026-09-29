@@ -40,9 +40,13 @@ claims:
 - Environment: `npm-release`
 - Allowed action: `npm publish`
 
-The GitHub `npm-release` environment must require at least one reviewer,
-prevent self-review, allow protected branches only, and disallow administrator
-bypass. The workflow checks those GitHub settings at runtime and fails before
+Proposed solo-owner policy (requires explicit owner acceptance before merge):
+the GitHub `npm-release` environment requires only user `berthelius`
+(GitHub ID `135700094`) as reviewer, allows that owner to review their own
+dispatch, allows protected branches only, and disallows administrator bypass.
+The workflow also pins manual dispatch and rerun to that same owner.
+This replaces independent review with the owner’s manual approval; it does not
+provide two-person governance. The workflow checks those GitHub settings at runtime and fails before
 publish if they are absent.
 A missing or mismatched
 npm trusted publisher causes `npm publish` to fail authentication; no
@@ -66,9 +70,9 @@ reviewed by an owner.
 ## Current first-release blockers (September 29, 2026)
 
 The `npm-release` environment does not yet exist, main has no branch protection,
-and the repository currently has only one collaborator (`berthelius`). Its
-reviewed release contract requires an independent reviewer and must not be
-silently weakened. npm is signed in as `frihet`, but the package has no trusted
+and the repository currently has only one collaborator (`berthelius`). The main-branch contract currently requires an independent reviewer. This
+branch proposes owner-only approval to match the sole-maintainer account,
+subject to the owner’s explicit acceptance; until merged, the old contract applies. npm is signed in as `frihet`, but the package has no trusted
 publisher configured. These provider settings and an eligible reviewer must be
 resolved before dispatch.
 

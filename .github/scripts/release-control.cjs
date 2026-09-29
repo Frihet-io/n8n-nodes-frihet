@@ -15,6 +15,8 @@ const REPOSITORY = 'Frihet-io/n8n-nodes-frihet';
 const MAIN_BRANCH = 'main';
 const MAIN_REF = `refs/heads/${MAIN_BRANCH}`;
 const ENVIRONMENT = 'npm-release';
+const OWNER = 'berthelius';
+const OWNER_ID = 135700094;
 const NODE_VERSION = 'v24.20.0';
 const NPM_VERSION = '11.19.0';
 const REGISTRY = 'https://registry.npmjs.org';
@@ -203,8 +205,10 @@ function decideRegistryAction(published, evidence, expectedSha) {
 function validateEnvironmentPolicy(environment) {
 	invariant(environment && typeof environment === 'object', 'GitHub environment response is missing');
 	const reviewers = (environment.protection_rules ?? []).find((rule) => rule.type === 'required_reviewers');
-	invariant(reviewers && Array.isArray(reviewers.reviewers) && reviewers.reviewers.length > 0, 'npm-release must require at least one reviewer');
-	invariant(reviewers.prevent_self_review === true, 'npm-release must prevent self-review');
+	invariant(reviewers && Array.isArray(reviewers.reviewers) && reviewers.reviewers.length === 1
+		&& reviewers.reviewers[0].type === 'User' && reviewers.reviewers[0].reviewer?.id === OWNER_ID,
+		'npm-release must require only the verified repository owner');
+	invariant(reviewers.prevent_self_review === false, 'npm-release owner approval must allow the owner to review their dispatch');
 	invariant(environment.deployment_branch_policy?.protected_branches === true, 'npm-release must allow protected branches only');
 	invariant(environment.can_admins_bypass === false, 'npm-release must disallow administrator bypass');
 	return true;
@@ -255,6 +259,9 @@ function git(...args) {
 }
 
 function validateDispatchContext(context) {
+	invariant(context.eventName === 'workflow_dispatch', 'Release requires a manual workflow dispatch');
+	invariant(context.actor === OWNER && context.triggeringActor === OWNER && String(context.actorId) === String(OWNER_ID),
+		'Release dispatch and rerun must belong to the verified owner');
 	invariant(context.repository === REPOSITORY, `Unexpected repository: ${context.repository}`);
 	invariant(context.ref === MAIN_REF, `Release must run from main, got ${context.ref}`);
 	invariant(context.inputVersion === VERSION, `Release input must be ${VERSION}`);
@@ -266,6 +273,10 @@ function validateDispatchContext(context) {
 
 function assertDispatch() {
 	validateDispatchContext({
+		eventName: process.env.GITHUB_EVENT_NAME,
+		actor: process.env.GITHUB_ACTOR,
+		actorId: process.env.GITHUB_ACTOR_ID,
+		triggeringActor: process.env.GITHUB_TRIGGERING_ACTOR,
 		repository: process.env.GITHUB_REPOSITORY,
 		ref: process.env.GITHUB_REF,
 		inputVersion: process.env.INPUT_VERSION,
