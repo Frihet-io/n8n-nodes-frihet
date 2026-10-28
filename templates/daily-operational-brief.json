@@ -57,6 +57,7 @@
       "name": "List Recent Invoices",
       "type": "n8n-nodes-frihet.frihet",
       "typeVersion": 1,
+      "executeOnce": true,
       "position": [720, 140],
       "credentials": {
         "frihetApi": {
@@ -78,6 +79,7 @@
       "name": "List Recent Quotes",
       "type": "n8n-nodes-frihet.frihet",
       "typeVersion": 1,
+      "executeOnce": true,
       "position": [720, 320],
       "credentials": {
         "frihetApi": {
@@ -99,6 +101,7 @@
       "name": "List Recent Expenses",
       "type": "n8n-nodes-frihet.frihet",
       "typeVersion": 1,
+      "executeOnce": true,
       "position": [720, 500],
       "credentials": {
         "frihetApi": {
@@ -163,16 +166,6 @@
             "node": "List Recent Invoices",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "List Recent Quotes",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "List Recent Expenses",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -181,7 +174,7 @@
       "main": [
         [
           {
-            "node": "Build Operational Brief",
+            "node": "List Recent Quotes",
             "type": "main",
             "index": 0
           }
@@ -192,7 +185,7 @@
       "main": [
         [
           {
-            "node": "Build Operational Brief",
+            "node": "List Recent Expenses",
             "type": "main",
             "index": 0
           }
