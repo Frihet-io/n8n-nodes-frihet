@@ -3,7 +3,7 @@
 Ready-to-import n8n workflow templates for [Frihet ERP](https://frihet.io). All
 templates use the `n8n-nodes-frihet` community node.
 
-> **Only the six top-level JSON files are ready to import.** Two legacy
+> **Only the seven top-level JSON files are ready to import.** Two legacy
 > webhook-receiver files remain under [`unverified-webhooks/`](./unverified-webhooks/)
 > as quarantined audit evidence. They are not production templates, must not be
 > imported or activated, and do not implement HMAC verification.
@@ -107,12 +107,25 @@ Runs every Monday at 8am. Fetches all invoices and expenses from the previous 7 
 
 ---
 
+### 7. `daily-operational-brief.json`
+**Daily Operational Brief → Slack**
+
+Runs Monday–Friday at 8am to answer *"¿Qué debería revisar hoy en mi negocio y por qué?"*. Lists recent invoices, quotes, and expenses in read-only mode, strictly separates unissued `draft` invoices from issued fiscal receivables (`sent`, `overdue`, `partial`), highlights invoices maturing within 7 days, flags `sent` quotes expiring within 7 days, and surfaces expenses missing vendor/category or marked `taxDeductible: false` (as a valid state to confirm before quarterly close, not an error). All suggested follow-up actions carry `humanApprovalRequired: true` and `autoExecuted: false`.
+
+**Nodes:** Schedule (weekdays 8am) → Set (brief window) → Frihet (list invoices) + Frihet (list quotes) + Frihet (list expenses) → Code (build operational brief) → Slack (post brief)
+
+**Credentials needed:** Frihet API, Slack OAuth2
+
+**Setup:** Set `SLACK_CHANNEL_ID` environment variable to your target channel ID (e.g., `C0123456789`), or update directly in the Slack node.
+
+---
+
 ## Environment Variables
 
 | Variable | Used In | Description |
 |----------|---------|-------------|
 | `FINANCE_EMAIL` | Templates 2, 3, 4 | Internal email for reports and alerts |
-| `SLACK_CHANNEL_ID` | Template 6 | Slack channel ID for weekly digest |
+| `SLACK_CHANNEL_ID` | Templates 6, 7 | Slack channel ID for weekly digest and daily operational brief |
 
 Set these in n8n under **Settings → Environment Variables** (self-hosted) or directly in the node parameters.
 
