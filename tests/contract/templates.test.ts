@@ -201,4 +201,139 @@ describe('templates/ — contract sanity', () => {
 		expect(quarantine).toContain('no production-safe template is shipped');
 		expect(quarantine).not.toContain('security by obscurity');
 	});
+
+	it('daily-operational-brief.json uses only read-only Frihet list operations and separates drafts from issued receivables', () => {
+		const wf = loadTemplate('daily-operational-brief.json');
+		const frihetNodes = getFrihetNodes(wf);
+		expect(frihetNodes.length).toBeGreaterThanOrEqual(3);
+		for (const { params } of frihetNodes) {
+			expect(params.operation).toBe('list');
+		}
+		const codeNode = wf.nodes.find((n) => n.name === 'Build Operational Brief');
+		expect(codeNode).toBeDefined();
+		const jsCode = String(codeNode?.parameters?.jsCode ?? '');
+		expect(jsCode).toContain("i.status === 'draft'");
+		expect(jsCode).toContain("['sent', 'overdue', 'partial', 'partially_paid', 'unpaid', 'issued']");
+		expect(jsCode).toContain('humanApprovalRequired: true');
+		expect(jsCode).toContain('autoExecuted: false');
+	});
+
+	it('daily-operational-brief.json Code node enforces the 5 canonical monetary & temporal brief rules against golden counterexamples', () => {
+		const wf = loadTemplate('daily-operational-brief.json');
+		const codeNode = wf.nodes.find((n) => n.name === 'Build Operational Brief');
+		const jsCode = String(codeNode?.parameters?.jsCode ?? '');
+
+		const runBriefCode = (fixtures: {
+			asOfDate?: string;
+			invoices?: Array<Record<string, any>>;
+			quotes?: Array<Record<string, any>>;
+			expenses?: Array<Record<string, any>>;
+		}) => {
+			const asOfDate = fixtures.asOfDate ?? '2026-10-28';
+			const $ = (nodeName: string) => {
+				if (nodeName === 'Set Brief Window') {
+					return { item: { json: { asOfDate } } };
+				}
+				if (nodeName === 'List Recent Invoices') {
+					return { all: () => (fixtures.invoices ?? []).map((json) => ({ json })) };
+				}
+				if (nodeName === 'List Recent Quotes') {
+					return { all: () => (fixtures.quotes ?? []).map((json) => ({ json })) };
+				}
+				if (nodeName === 'List Recent Expenses') {
+					return { all: () => (fixtures.expenses ?? []).map((json) => ({ json })) };
+				}
+				throw new Error(`Unexpected node lookup: ${nodeName}`);
+			};
+			// eslint-disable-next-line no-new-func
+			const fn = new Function('$', jsCode);
+			const result = fn($);
+			return result[0].json;
+		};
+
+		// Golden Counterexample 1: Absent != 0 ({} -> null / unavailable, never 0.0 EUR)
+		const emptyDocBrief = runBriefCode({
+			invoices: [{ id: 'inv_empty', status: 'overdue', dueDate: '2026-10-10' }],
+		});
+		expect(emptyDocBrief.collectionsAndDueDates.overdueCount).toBe(1);
+		expect(emptyDocBrief.collectionsAndDueDates.overdueTotal.amount).toBeNull();
+		expect(emptyDocBrief.collectionsAndDueDates.overdueTotal.provenance).toBe('unavailable');
+		expect(emptyDocBrief.collectionsAndDueDates.overdueTotal.unavailableCount).toBe(1);
+		expect(emptyDocBrief.slackMessage).toContain('No disponible');
+
+		// Golden Counterexample 2: Multi-currency separation (100 EUR + 100 USD -> MIXED, never 200 EUR)
+		const mixedCurrencyBrief = runBriefCode({
+			invoices: [
+				{ id: 'inv_eur', status: 'overdue', dueDate: '2026-10-10', total: 100, currency: 'EUR' },
+				{ id: 'inv_usd', status: 'overdue', dueDate: '2026-10-12', total: 100, currency: 'USD' },
+			],
+		});
+		expect(mixedCurrencyBrief.collectionsAndDueDates.overdueTotal.amount).toBeNull();
+		expect(mixedCurrencyBrief.collectionsAndDueDates.overdueTotal.currency).toBe('MIXED');
+		expect(mixedCurrencyBrief.collectionsAndDueDates.overdueTotal.provenance).toBe(
+			'mixed_currency_unconverted',
+		);
+		expect(mixedCurrencyBrief.collectionsAndDueDates.overdueTotal.totalsByCurrency).toEqual({
+			EUR: { amount: 100, count: 1, provenance: 'stored_field' },
+			USD: { amount: 100, count: 1, provenance: 'stored_field' },
+		});
+		expect(mixedCurrencyBrief.slackMessage).toContain('Multi-divisa sin convertir');
+
+		// Golden Counterexample 3: Canonical discounts & taxes (100 with discountRate: 10 -> 90.0 EUR)
+		const discountedBrief = runBriefCode({
+			asOfDate: '2026-10-28',
+			invoices: [
+				{
+					id: 'inv_disc',
+					status: 'overdue',
+					issueDate: '2026-09-15',
+					dueDate: '2026-10-15',
+					items: [{ quantity: 1, unitPrice: 100 }],
+					discountRate: 10,
+					taxRate: 0,
+					irpfRate: 0,
+					currency: 'EUR',
+				},
+				{
+					id: 'inv_oct',
+					status: 'sent',
+					issueDate: '2026-10-20',
+					dueDate: '2026-11-01',
+					items: [{ quantity: 2, unitPrice: 100, discount: 10 }],
+					discountRate: 5,
+					taxRate: 21,
+					equivalenceSurchargeRate: 5.2,
+					irpfRate: 15,
+					currency: 'EUR',
+				},
+				{
+					id: 'inv_draft',
+					status: 'draft',
+					issueDate: '2026-10-25',
+					total: 5000,
+					currency: 'EUR',
+				},
+			],
+		});
+		expect(discountedBrief.collectionsAndDueDates.overdueTotal.amount).toBe(90);
+		expect(discountedBrief.collectionsAndDueDates.overdueTotal.provenance).toBe(
+			'derived_from_items',
+		);
+		expect(discountedBrief.collectionsAndDueDates.upcomingDueWithin7DaysTotal.amount).toBe(190.15);
+		expect(discountedBrief.collectionsAndDueDates.openIssuedNominalTotal.amount).toBe(280.15);
+		expect(discountedBrief.collectionsAndDueDates.realOutstandingBalanceDeterminable).toBe(false);
+		expect(discountedBrief.collectionsAndDueDates.unpaidNominalSemantics).toBe(
+			'nominal_unpaid_invoice_totals_without_partial_payments',
+		);
+		expect(discountedBrief.collectionsAndDueDates.draftExcludedTotal.amount).toBe(5000);
+		expect(discountedBrief.coverage.temporalScope).toBe(
+			'unfiltered_operational_sample_as_of_date',
+		);
+		expect(discountedBrief.currentMonthActivity.referenceMonth).toBe('2026-10');
+		expect(discountedBrief.currentMonthActivity.issuedInvoicesInMonthCount).toBe(1);
+		expect(discountedBrief.currentMonthActivity.issuedInvoicesInMonthTotal.amount).toBe(190.15);
+		expect(discountedBrief.slackMessage).toContain(
+			'Importe nominal de facturas no marcadas como pagadas (saldo pendiente real no determinable sin cobros parciales)',
+		);
+	});
 });

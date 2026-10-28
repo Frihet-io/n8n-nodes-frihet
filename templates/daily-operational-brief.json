@@ -1,0 +1,232 @@
+{
+  "name": "Frihet | Daily Operational Brief → Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000001",
+      "name": "Schedule: Weekdays 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "asOfDate",
+              "value": "={{ new Date().toISOString().split('T')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "lookbackStart",
+              "value": "={{ (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000002",
+      "name": "Set Brief Window",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 320]
+    },
+    {
+      "parameters": {
+        "resource": "invoice",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "from": "={{ $json.lookbackStart }}"
+        }
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000003",
+      "name": "List Recent Invoices",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [720, 140],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "quote",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "from": "={{ $('Set Brief Window').item.json.lookbackStart }}"
+        }
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000004",
+      "name": "List Recent Quotes",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [720, 320],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "expense",
+        "operation": "list",
+        "returnAll": true,
+        "filters": {
+          "from": "={{ $('Set Brief Window').item.json.lookbackStart }}"
+        }
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000005",
+      "name": "List Recent Expenses",
+      "type": "n8n-nodes-frihet.frihet",
+      "typeVersion": 1,
+      "position": [720, 500],
+      "credentials": {
+        "frihetApi": {
+          "id": "1",
+          "name": "Frihet API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daily Operational Brief — Canonical Monetary & Temporal Brief Contract (frihet-mcp#257)\n// Answers: '¿Qué debería revisar hoy en mi negocio y por qué?'\n// Enforces all 5 canonical rules:\n// 1. Absent != 0: {} -> amount: null, provenance: 'unavailable', unavailableCount: 1.\n// 2. Multi-currency separation: 100 EUR + 100 USD -> amount: null, currency: 'MIXED',\n//    provenance: 'mixed_currency_unconverted', totalsByCurrency: { EUR: ..., USD: ... }.\n// 3. Canonical discounts & taxes: line discount, document discountRate, taxRate,\n//    equivalenceSurchargeRate, irpfRate over discounted tax-exclusive base; fail closed\n//    on pricesIncludeTax, deductLineDiscountAmounts, compoundTaxes, prepayment.\n// 4. Honest unpaid nominal wording: realOutstandingBalanceDeterminable: false,\n//    unpaidNominalSemantics: 'nominal_unpaid_invoice_totals_without_partial_payments',\n//    and label 'Importe nominal de facturas no marcadas como pagadas (saldo pendiente real no determinable sin cobros parciales)'.\n// 5. Explicit temporal scope: coverage.temporalScope = 'unfiltered_operational_sample_as_of_date'\n//    plus currentMonthActivity separating the operational sample as of asOfDate from periodMonth.\n\nconst roundCurrency = (value) => Math.round(value * 100) / 100;\n\nconst computeCanonicalDocumentTotal = (doc) => {\n  if (!doc || typeof doc !== 'object') return null;\n  const rawItems = doc.items;\n  if (!Array.isArray(rawItems) || rawItems.length === 0) return null;\n  if (doc.pricesIncludeTax === true || doc.deductLineDiscountAmounts === true) return null;\n  if (Array.isArray(doc.compoundTaxes) && doc.compoundTaxes.length > 0) return null;\n  if (doc.prepayment !== undefined && doc.prepayment !== null && doc.prepayment !== 0) return null;\n\n  const docDiscountPct = doc.discountRate === undefined || doc.discountRate === null ? 0 : doc.discountRate;\n  const docTaxRate = doc.taxRate === undefined || doc.taxRate === null ? 0 : doc.taxRate;\n  const docIrpfRate = doc.irpfRate === undefined || doc.irpfRate === null ? 0 : doc.irpfRate;\n  const docSurchargeRate = doc.equivalenceSurchargeRate === undefined || doc.equivalenceSurchargeRate === null ? 0 : doc.equivalenceSurchargeRate;\n\n  for (const rate of [docDiscountPct, docTaxRate, docIrpfRate, docSurchargeRate]) {\n    if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 100) return null;\n  }\n\n  const baseByRate = new Map();\n  let subtotalBeforeDiscount = 0;\n\n  for (const item of rawItems) {\n    if (!item || typeof item !== 'object') return null;\n    if (typeof item.quantity !== 'number' || !Number.isFinite(item.quantity) || item.quantity < 0) return null;\n    if (typeof item.unitPrice !== 'number' || !Number.isFinite(item.unitPrice) || item.unitPrice < 0) return null;\n    if (item.discountAmount !== undefined && item.discountAmount !== null && item.discountAmount !== 0) return null;\n\n    const lineDiscountPct = item.discount === undefined || item.discount === null ? 0 : item.discount;\n    if (typeof lineDiscountPct !== 'number' || !Number.isFinite(lineDiscountPct) || lineDiscountPct < 0 || lineDiscountPct > 100) return null;\n\n    const effectiveRate = item.taxRate === undefined || item.taxRate === null ? docTaxRate : item.taxRate;\n    if (typeof effectiveRate !== 'number' || !Number.isFinite(effectiveRate) || effectiveRate < 0 || effectiveRate > 100) return null;\n\n    const effectiveUnitPrice = roundCurrency(item.unitPrice * (1 - lineDiscountPct / 100));\n    const lineBase = roundCurrency(item.quantity * effectiveUnitPrice);\n    baseByRate.set(effectiveRate, roundCurrency((baseByRate.get(effectiveRate) || 0) + lineBase));\n    subtotalBeforeDiscount = roundCurrency(subtotalBeforeDiscount + lineBase);\n  }\n\n  const documentDiscount = roundCurrency(subtotalBeforeDiscount * (docDiscountPct / 100));\n  const subtotal = roundCurrency(subtotalBeforeDiscount - documentDiscount);\n\n  const discountedBaseByRate = new Map();\n  const sortedRates = Array.from(baseByRate.keys()).sort((a, b) => b - a);\n  if (docDiscountPct > 0 && subtotalBeforeDiscount > 0) {\n    const discountFactor = 1 - docDiscountPct / 100;\n    let otherGroupsTotal = 0;\n    sortedRates.forEach((rate, index) => {\n      const base = baseByRate.get(rate) || 0;\n      if (index < sortedRates.length - 1) {\n        const discounted = roundCurrency(base * discountFactor);\n        discountedBaseByRate.set(rate, discounted);\n        otherGroupsTotal = roundCurrency(otherGroupsTotal + discounted);\n      } else {\n        discountedBaseByRate.set(rate, roundCurrency(subtotal - otherGroupsTotal));\n      }\n    });\n  } else {\n    for (const [rate, base] of baseByRate.entries()) {\n      discountedBaseByRate.set(rate, base);\n    }\n  }\n\n  let totalTax = 0;\n  for (const [rate, base] of discountedBaseByRate.entries()) {\n    totalTax = roundCurrency(totalTax + roundCurrency(base * (rate / 100)));\n  }\n\n  const irpf = roundCurrency(subtotal * (docIrpfRate / 100));\n  const surcharge = roundCurrency(subtotal * (docSurchargeRate / 100));\n  return roundCurrency(subtotal + totalTax + surcharge - irpf);\n};\n\nconst resolveDocumentAmount = (doc, defaultCurrency = 'EUR') => {\n  const docCurrency =\n    doc && typeof doc.currency === 'string' && doc.currency.trim().length > 0\n      ? doc.currency.trim().toUpperCase()\n      : defaultCurrency;\n\n  if (doc && typeof doc.total === 'number' && Number.isFinite(doc.total)) {\n    return {\n      amount: roundCurrency(doc.total),\n      currency: docCurrency,\n      provenance: 'stored_field',\n      fieldOrFormula: 'doc.total'\n    };\n  }\n  if (doc && typeof doc.amount === 'number' && Number.isFinite(doc.amount)) {\n    return {\n      amount: roundCurrency(doc.amount),\n      currency: docCurrency,\n      provenance: 'stored_field',\n      fieldOrFormula: 'doc.amount'\n    };\n  }\n  const derived = computeCanonicalDocumentTotal(doc);\n  if (derived !== null) {\n    return {\n      amount: derived,\n      currency: docCurrency,\n      provenance: 'derived_from_items',\n      fieldOrFormula: 'canonical:round2(subtotal_after_line_and_doc_discount + tax + surcharge - irpf)'\n    };\n  }\n  return {\n    amount: null,\n    currency: docCurrency,\n    provenance: 'unavailable',\n    fieldOrFormula: 'missing:total|amount|supported_canonical_items',\n    unavailableCount: 1\n  };\n};\n\nconst sumProvenancedAmounts = (amounts, defaultCurrency = 'EUR') => {\n  if (!Array.isArray(amounts) || amounts.length === 0) {\n    return {\n      amount: 0,\n      currency: defaultCurrency,\n      provenance: 'stored_field',\n      fieldOrFormula: 'sum(0 items)',\n      totalsByCurrency: {},\n      unavailableCount: 0\n    };\n  }\n\n  const totalsByCurrency = {};\n  let unavailableCount = 0;\n  let anyDerived = false;\n\n  for (const item of amounts) {\n    if (!item || item.amount === null || item.provenance === 'unavailable' || typeof item.amount !== 'number' || !Number.isFinite(item.amount)) {\n      unavailableCount += item && typeof item.unavailableCount === 'number' ? item.unavailableCount : 1;\n      continue;\n    }\n    const curr = item.currency || defaultCurrency;\n    const bucket = totalsByCurrency[curr] || {\n      amount: 0,\n      count: 0,\n      provenance: 'stored_field'\n    };\n    bucket.amount = roundCurrency(bucket.amount + item.amount);\n    bucket.count += 1;\n    if (item.provenance === 'derived_from_items') {\n      bucket.provenance = 'derived_from_items';\n      anyDerived = true;\n    }\n    totalsByCurrency[curr] = bucket;\n  }\n\n  const currencies = Object.keys(totalsByCurrency);\n\n  if (unavailableCount > 0) {\n    const bucketCurrency =\n      currencies.length === 1\n        ? currencies[0]\n        : currencies.length > 1\n          ? 'MIXED'\n          : defaultCurrency;\n    return {\n      amount: null,\n      currency: bucketCurrency,\n      provenance: 'unavailable',\n      fieldOrFormula: `unavailable(${unavailableCount} of ${amounts.length} documents missing canonical amount)`,\n      totalsByCurrency,\n      unavailableCount\n    };\n  }\n\n  if (currencies.length > 1) {\n    return {\n      amount: null,\n      currency: 'MIXED',\n      provenance: 'mixed_currency_unconverted',\n      fieldOrFormula: `mixed_currencies(${currencies.join(',')}):no_fx_conversion_applied`,\n      totalsByCurrency,\n      unavailableCount: 0\n    };\n  }\n\n  const singleCurr = currencies[0];\n  const singleBucket = totalsByCurrency[singleCurr];\n  return {\n    amount: singleBucket.amount,\n    currency: singleCurr,\n    provenance: anyDerived ? 'derived_from_items' : 'stored_field',\n    fieldOrFormula: `sum(${amounts.length} items in ${singleCurr})`,\n    totalsByCurrency,\n    unavailableCount: 0\n  };\n};\n\nconst formatProvenancedAmount = (pa) => {\n  if (pa.provenance === 'mixed_currency_unconverted' && pa.totalsByCurrency) {\n    const parts = Object.entries(pa.totalsByCurrency).map(\n      ([curr, b]) => `${b.amount.toFixed(2)} ${curr} (${b.count} doc(s), ${b.provenance})`\n    );\n    return `Multi-divisa sin convertir [${parts.join('; ')}]`;\n  }\n  if (pa.amount === null || pa.provenance === 'unavailable') {\n    const partialParts = pa.totalsByCurrency\n      ? Object.entries(pa.totalsByCurrency).map(\n          ([curr, b]) => `${b.amount.toFixed(2)} ${curr} (${b.count} doc(s))`\n        )\n      : [];\n    const partialSuffix =\n      partialParts.length > 0\n        ? ` — subtotal parcial verificado: ${partialParts.join('; ')}`\n        : '';\n    return `No disponible (${pa.unavailableCount || 1} doc(s) sin importe determinable [${pa.fieldOrFormula}]${partialSuffix})`;\n  }\n  return `${pa.amount.toFixed(2)} ${pa.currency} (${pa.provenance})`;\n};\n\nconst asOfDate = $('Set Brief Window').item.json.asOfDate;\nconst periodMonth = asOfDate.slice(0, 7);\nconst todayMs = new Date(asOfDate + 'T00:00:00Z').getTime();\nconst dayMs = 86400000;\n\nconst invoices = $('List Recent Invoices').all().map(i => i.json);\nconst quotes = $('List Recent Quotes').all().map(q => q.json);\nconst expenses = $('List Recent Expenses').all().map(e => e.json);\n\nconst draftInvoices = invoices\n  .filter(i => i.status === 'draft')\n  .map(i => ({ ...i, resolvedAmount: resolveDocumentAmount(i, 'EUR') }));\nconst issuedOpenInvoices = invoices\n  .filter(i => ['sent', 'overdue', 'partial', 'partially_paid', 'unpaid', 'issued'].includes(i.status))\n  .map(i => ({ ...i, resolvedAmount: resolveDocumentAmount(i, 'EUR') }));\n\nconst overdueInvoices = [];\nconst dueSoonInvoices = [];\nfor (const inv of issuedOpenInvoices) {\n  const dueStr = (inv.dueDate || '').slice(0, 10);\n  const dueMs = dueStr ? new Date(dueStr + 'T00:00:00Z').getTime() : NaN;\n  const diffDays = Number.isFinite(dueMs) ? Math.round((dueMs - todayMs) / dayMs) : null;\n  if (inv.status === 'overdue' || (diffDays !== null && diffDays < 0)) {\n    overdueInvoices.push({ ...inv, daysOverdue: diffDays !== null ? Math.abs(diffDays) : null });\n  } else if (diffDays !== null && diffDays >= 0 && diffDays <= 7) {\n    dueSoonInvoices.push({ ...inv, daysUntilDue: diffDays });\n  }\n}\n\nconst expiringQuotes = quotes\n  .filter(q => {\n    if (q.status !== 'sent') return false;\n    const validStr = (q.validUntil || '').slice(0, 10);\n    if (!validStr) return true;\n    const diffDays = Math.round((new Date(validStr + 'T00:00:00Z').getTime() - todayMs) / dayMs);\n    return diffDays <= 7;\n  })\n  .map(q => ({ ...q, resolvedAmount: resolveDocumentAmount(q, 'EUR') }));\n\nconst expensesToReview = expenses\n  .map(e => ({ ...e, resolvedAmount: resolveDocumentAmount(e, 'EUR') }))\n  .filter(e => !e.vendor || !e.category || e.taxDeductible === false || e.resolvedAmount.provenance === 'unavailable');\n\nconst overdueTotal = sumProvenancedAmounts(overdueInvoices.map(i => i.resolvedAmount), 'EUR');\nconst dueSoonTotal = sumProvenancedAmounts(dueSoonInvoices.map(i => i.resolvedAmount), 'EUR');\nconst openIssuedNominalTotal = sumProvenancedAmounts(issuedOpenInvoices.map(i => i.resolvedAmount), 'EUR');\nconst draftExcludedTotal = sumProvenancedAmounts(draftInvoices.map(i => i.resolvedAmount), 'EUR');\nconst expiringQuotesTotal = sumProvenancedAmounts(expiringQuotes.map(q => q.resolvedAmount), 'EUR');\nconst totalSampledExpenses = sumProvenancedAmounts(expenses.map(e => resolveDocumentAmount(e, 'EUR')), 'EUR');\n\nconst isInPeriodMonth = (dateStr) => typeof dateStr === 'string' && dateStr.slice(0, 7) === periodMonth;\nconst issuedInvoicesInMonth = invoices.filter(i => !['draft', 'cancelled', 'void', 'voided'].includes(i.status) && isInPeriodMonth(i.issueDate || i.date));\nconst draftInvoicesInMonth = draftInvoices.filter(i => isInPeriodMonth(i.issueDate || i.date));\nconst quotesInMonth = quotes.filter(q => isInPeriodMonth(q.issueDate || q.date));\nconst expensesInMonth = expenses.filter(e => isInPeriodMonth(e.date || e.expenseDate));\n\nconst currentMonthActivity = {\n  referenceMonth: periodMonth,\n  scopeNote: `Subconjunto de registros dentro de la muestra cuya fecha pertenece a ${periodMonth}, separado de la muestra operativa abierta al ${asOfDate}.`,\n  issuedInvoicesInMonthCount: issuedInvoicesInMonth.length,\n  issuedInvoicesInMonthTotal: sumProvenancedAmounts(issuedInvoicesInMonth.map(i => resolveDocumentAmount(i, 'EUR')), 'EUR'),\n  draftInvoicesInMonthCount: draftInvoicesInMonth.length,\n  draftInvoicesInMonthTotal: sumProvenancedAmounts(draftInvoicesInMonth.map(i => i.resolvedAmount), 'EUR'),\n  quotesCreatedInMonthCount: quotesInMonth.length,\n  quotesCreatedInMonthTotal: sumProvenancedAmounts(quotesInMonth.map(q => resolveDocumentAmount(q, 'EUR')), 'EUR'),\n  expensesInMonthCount: expensesInMonth.length,\n  expensesInMonthTotal: sumProvenancedAmounts(expensesInMonth.map(e => resolveDocumentAmount(e, 'EUR')), 'EUR')\n};\n\nconst unpaidNominalLabel = 'Importe nominal de facturas no marcadas como pagadas (saldo pendiente real no determinable sin cobros parciales)';\n\nconst lines = [\n  `*Frihet Daily Operational Brief (${asOfDate})*`,\n  `_¿Qué debería revisar hoy en mi negocio y por qué?_`,\n  '',\n  '*1. Cobertura y Alcance Temporal*',\n  `• Alcance temporal: unfiltered_operational_sample_as_of_date (muestra operativa abierta al ${asOfDate} + desglose del mes ${periodMonth})`,\n  '',\n  '*2. Cobros y Vencimientos (Issued Receivables — excludes drafts)*',\n  `• ${unpaidNominalLabel} (${issuedOpenInvoices.length}): *${formatProvenancedAmount(openIssuedNominalTotal)}*`,\n  `• Facturas vencidas (P1) (${overdueInvoices.length}): *${formatProvenancedAmount(overdueTotal)}*`,\n  `• Próximos vencimientos ≤7 días (P2) (${dueSoonInvoices.length}): *${formatProvenancedAmount(dueSoonTotal)}*`,\n  `• Borradores no emitidos excluidos de cuentas por cobrar (${draftInvoices.length}): ${formatProvenancedAmount(draftExcludedTotal)}`,\n  '',\n  '*3. Presupuestos por Seguimiento (P2)*',\n  `• Presupuestos enviados próximos a expirar (${expiringQuotes.length}): ${formatProvenancedAmount(expiringQuotesTotal)}`,\n  '',\n  '*4. Gastos por Revisar (P3)*',\n  `• Gastos sin proveedor/categoría o marcados no deducibles (taxDeductible=false estado válido): ${expensesToReview.length} (total muestra: ${formatProvenancedAmount(totalSampledExpenses)})`,\n  '',\n  `*5. Actividad del Mes en Curso (${periodMonth}) vs Muestra Operativa*`,\n  `• Facturas emitidas en ${periodMonth} (${currentMonthActivity.issuedInvoicesInMonthCount}): ${formatProvenancedAmount(currentMonthActivity.issuedInvoicesInMonthTotal)}`,\n  `• Gastos fechados en ${periodMonth} (${currentMonthActivity.expensesInMonthCount}): ${formatProvenancedAmount(currentMonthActivity.expensesInMonthTotal)}`,\n  '',\n  '*6. Safety & Approval Gate*',\n  '• All follow-up actions (sending reminders, issuing drafts, logging CRM calls) require human approval (`humanApprovalRequired: true`, `autoExecuted: false`).',\n  '• Known unknown: Bank account balances and partial payments are not inferred (`realOutstandingBalanceDeterminable: false`).'\n];\n\nreturn [{\n  json: {\n    asOfDate,\n    question: '¿Qué debería revisar hoy en mi negocio y por qué?',\n    coverage: {\n      temporalScope: 'unfiltered_operational_sample_as_of_date'\n    },\n    collectionsAndDueDates: {\n      overdueCount: overdueInvoices.length,\n      overdueTotal,\n      upcomingDueWithin7DaysCount: dueSoonInvoices.length,\n      upcomingDueWithin7DaysTotal: dueSoonTotal,\n      openIssuedCount: issuedOpenInvoices.length,\n      openIssuedNominalTotal,\n      realOutstandingBalanceDeterminable: false,\n      unpaidNominalSemantics: 'nominal_unpaid_invoice_totals_without_partial_payments',\n      unpaidNominalLabel,\n      draftExcludedCount: draftInvoices.length,\n      draftExcludedTotal\n    },\n    currentMonthActivity,\n    overdueCount: overdueInvoices.length,\n    overdueTotal,\n    dueSoonCount: dueSoonInvoices.length,\n    draftCount: draftInvoices.length,\n    draftTotal: draftExcludedTotal,\n    expiringQuotesCount: expiringQuotes.length,\n    expensesToReviewCount: expensesToReview.length,\n    humanApprovalRequired: true,\n    autoExecuted: false,\n    slackMessage: lines.join('\\n')\n  }\n}];"
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000006",
+      "name": "Build Operational Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 320]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $env.SLACK_CHANNEL_ID || '#finance' }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.slackMessage }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "b8c9d0e1-0008-4000-8000-000000000007",
+      "name": "Post Brief to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1220, 320],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "4",
+          "name": "Slack OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: Weekdays 8am": {
+      "main": [
+        [
+          {
+            "node": "Set Brief Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Brief Window": {
+      "main": [
+        [
+          {
+            "node": "List Recent Invoices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "List Recent Quotes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "List Recent Expenses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Recent Invoices": {
+      "main": [
+        [
+          {
+            "node": "Build Operational Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Recent Quotes": {
+      "main": [
+        [
+          {
+            "node": "Build Operational Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Recent Expenses": {
+      "main": [
+        [
+          {
+            "node": "Build Operational Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Operational Brief": {
+      "main": [
+        [
+          {
+            "node": "Post Brief to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "frihet-template"
+  }
+}
